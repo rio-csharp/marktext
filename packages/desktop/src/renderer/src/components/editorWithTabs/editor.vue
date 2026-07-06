@@ -124,7 +124,7 @@ import { isOsx, animatedScrollTo } from '@/util'
 import { moveImageToFolder, uploadImage } from '@/util/fileSystem'
 import { guessClipboardFilePath } from '@/util/clipboard'
 import { getCssForOptions, getHtmlToc, type PdfCssOptions, type HtmlTocOptions } from '@/util/pdf'
-import { resolveTocHeadingElement } from '@/util/tocNavigation'
+import { TOP_LEVEL_HEADINGS_SELECTOR, resolveTocHeadingElement } from '@/util/tocNavigation'
 import { addCommonStyle, setEditorWidth } from '@/util/theme'
 import { usePreferencesStore } from '@/store/preferences'
 import { useEditorStore } from '@/store/editor'
@@ -249,7 +249,8 @@ const {
   // Edit modes
   typewriter,
   focus,
-  sourceCode
+  sourceCode,
+  readOnly
 } = storeToRefs(preferencesStore)
 
 // Editor store refs
@@ -285,6 +286,7 @@ let switchLanguageCommand: SpellcheckerLanguageCommand | null = null
 let imageViewer: SimpleImageViewer | null = null
 // The engine has no `scroll` event; we listen on the scroll container directly.
 let scrollHandler: ((e: Event) => void) | null = null
+let tocScrollFrame: number | null = null
 
 // The engine's undo/redo history (`getHistory()`) has a different shape than
 // the desktop store's `tab.history` (which drives the save/dirty tracking and
@@ -546,13 +548,9 @@ watch(focus, (value) => {
   }
 })
 
-// In source-code mode the Paragraph and Format menus operate on the hidden
-// WYSIWYG engine, so grey them out. On return to WYSIWYG, re-apply the menu
-// state for the CURRENT cursor context (a code block/table still disables some
-// items) rather than blanket-enabling everything (#3531).
-watch(sourceCode, (isSource) => {
+const syncEditorFormatMenus = (): void => {
   const windowId = window.marktext?.env?.windowId ?? -1
-  if (isSource) {
+  if (sourceCode.value || readOnly.value) {
     window.electron.ipcRenderer.send('mt::set-editor-format-menus-enabled', windowId, false)
     return
   }
@@ -563,6 +561,19 @@ watch(sourceCode, (isSource) => {
       window.electron.ipcRenderer.send('mt::set-editor-format-menus-enabled', windowId, true)
     }
   })
+}
+
+// In source-code mode the Paragraph and Format menus operate on the hidden
+// WYSIWYG engine, so grey them out. On return to WYSIWYG, re-apply the menu
+// state for the CURRENT cursor context (a code block/table still disables some
+// items) rather than blanket-enabling everything (#3531).
+watch(sourceCode, () => {
+  syncEditorFormatMenus()
+})
+
+watch(readOnly, () => {
+  applyReadOnlyState()
+  syncEditorFormatMenus()
 })
 
 watch(fontSize, (value, oldValue) => {
@@ -991,6 +1002,41 @@ const imagePathPicker = () => {
   return editorStore.ASK_FOR_IMAGE_PATH()
 }
 
+const isReadOnly = (): boolean => !!readOnly.value
+
+const isAllowedReadOnlyKey = (event: KeyboardEvent): boolean => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return true
+  return [
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'End',
+    'Escape',
+    'Home',
+    'PageDown',
+    'PageUp'
+  ].includes(event.key)
+}
+
+const preventReadOnlyMutation = (event: Event): void => {
+  if (!isReadOnly()) return
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+const preventReadOnlyKeyMutation = (event: KeyboardEvent): void => {
+  if (!isReadOnly() || isAllowedReadOnlyKey(event)) return
+  preventReadOnlyMutation(event)
+}
+
+const applyReadOnlyState = (): void => {
+  const container = getScrollContainer()
+  if (!container) return
+  container.setAttribute('contenteditable', isReadOnly() ? 'false' : 'true')
+  container.classList.toggle('read-only', isReadOnly())
+}
+
 const keyup = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     setImageViewerVisible(false)
@@ -1056,6 +1102,7 @@ const openSpellcheckerLanguageCommand = () => {
 }
 
 const replaceMisspelling = (payload: unknown) => {
+  if (isReadOnly()) return
   const { word, replacement } = payload as { word: string; replacement: string }
   if (editor.value) {
     editor.value.replaceCurrentWordInlineUnsafe(word, replacement)
@@ -1063,7 +1110,7 @@ const replaceMisspelling = (payload: unknown) => {
 }
 
 const handleUndo = () => {
-  if (sourceCode.value) {
+  if (sourceCode.value || isReadOnly()) {
     return
   }
 
@@ -1073,7 +1120,7 @@ const handleUndo = () => {
 }
 
 const handleRedo = () => {
-  if (sourceCode.value) {
+  if (sourceCode.value || isReadOnly()) {
     return
   }
 
@@ -1111,6 +1158,7 @@ const COPY_PASTE_METHOD_MAP: Record<string, 'copyAsRich' | 'copyAsHtml' | 'paste
   pasteAsPlainText: 'pasteAsPlainText'
 }
 const handleCopyPaste = (type: unknown) => {
+  if (isReadOnly() && type === 'pasteAsPlainText') return
   if (editor.value) {
     const method = COPY_PASTE_METHOD_MAP[type as string]
     if (method) editor.value[method]()
@@ -1118,6 +1166,7 @@ const handleCopyPaste = (type: unknown) => {
 }
 
 const insertImage = (src: unknown) => {
+  if (isReadOnly()) return
   if (!sourceCode.value) {
     editor.value && editor.value.insertImage({ src })
   }
@@ -1147,11 +1196,13 @@ const handleSearch = (payload: unknown) => {
 }
 
 const handReplace = (payload: unknown) => {
+  if (isReadOnly()) return
   const { value, opt } = payload as { value: string; opt: unknown }
   editorStore.SEARCH(toSearchMatches(editor.value.replace(value, opt)))
 }
 
 const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
+  if (isReadOnly()) return
   insertImage(url)
   editorStore.SHOW_IMAGE_DELETION_URL(deletionUrl as string)
 }
@@ -1223,6 +1274,24 @@ const scrollElementIntoView = (anchor: Element | null | undefined, duration = 30
   if (!container || !anchor) return
   const { y } = anchor.getBoundingClientRect()
   animatedScrollTo(container, container.scrollTop + y - STANDAR_Y, duration)
+}
+
+const updateActiveTocIndexFromScroll = (): void => {
+  const container = getScrollContainer()
+  if (!container || editorStore.listToc.length === 0) {
+    editorStore.SET_ACTIVE_TOC_INDEX(-1)
+    return
+  }
+
+  const containerTop = container.getBoundingClientRect().top
+  const headings = Array.from(container.querySelectorAll(TOP_LEVEL_HEADINGS_SELECTOR))
+  let activeIndex = 0
+  headings.forEach((heading, index) => {
+    if (heading.getBoundingClientRect().top - containerTop <= STANDAR_Y) {
+      activeIndex = index
+    }
+  })
+  editorStore.SET_ACTIVE_TOC_INDEX(activeIndex)
 }
 
 const scrollToHighlight = () => {
@@ -1390,6 +1459,7 @@ const pushSelectionMenuState = (changes: MuyaChange) => {
 }
 
 const handleEditParagraph = (type: unknown) => {
+  if (isReadOnly()) return
   // These commands act on the hidden WYSIWYG engine, so block them in
   // source-code mode (mirrors handleUndo/handleSelectAll) — otherwise e.g. the
   // Insert Table wizard opens and writes to the invisible editor (#3531).
@@ -1416,7 +1486,7 @@ const handleEditParagraph = (type: unknown) => {
 
 // handle `duplicate`, `delete`, `create paragraph below`
 const handleParagraph = (type: unknown) => {
-  if (sourceCode.value) {
+  if (sourceCode.value || isReadOnly()) {
     return
   }
   if (editor.value) {
@@ -1437,13 +1507,14 @@ const handleParagraph = (type: unknown) => {
 }
 
 const handleInlineFormat = (type: unknown) => {
-  if (sourceCode.value) {
+  if (sourceCode.value || isReadOnly()) {
     return
   }
   editor.value && editor.value.format(type)
 }
 
 const handleDialogTableConfirm = () => {
+  if (isReadOnly()) return
   dialogTableVisible.value = false
   editor.value && editor.value.createTable(tableChecker)
 }
@@ -1615,6 +1686,7 @@ const handleFileChange = (payload: unknown) => {
 }
 
 const handleInsertParagraph = (location: unknown) => {
+  if (isReadOnly()) return
   editor.value && editor.value.insertParagraph(location)
 }
 
@@ -1641,7 +1713,7 @@ const focusEditor = () => {
 const focusFreshEditor = () => {
   requestAnimationFrame(() => {
     const ed = editor.value
-    if (!ed) return
+    if (!ed || isReadOnly()) return
     ed.domNode.focus()
     ed.focus()
   })
@@ -1664,6 +1736,7 @@ const handleModalOpening = () => {
 // Electron 42 Chromium, so insert the saved image at the cursor through the
 // engine (routing via `imageAction` → upload/folder/path).
 const handleScreenShot = (filePath?: unknown) => {
+  if (isReadOnly()) return
   if (editor.value && typeof filePath === 'string' && filePath) {
     editor.value.pasteImage(filePath)
   }
@@ -1892,8 +1965,20 @@ onMounted(() => {
     if (currentFile.value) {
       editorStore.updateScrollPosition(currentFile.value.id, container.scrollTop)
     }
+    if (tocScrollFrame != null) return
+    tocScrollFrame = requestAnimationFrame(() => {
+      tocScrollFrame = null
+      updateActiveTocIndexFromScroll()
+    })
   }
   container.addEventListener('scroll', scrollHandler, { passive: true })
+  container.addEventListener('beforeinput', preventReadOnlyMutation, true)
+  container.addEventListener('paste', preventReadOnlyMutation, true)
+  container.addEventListener('cut', preventReadOnlyMutation, true)
+  container.addEventListener('drop', preventReadOnlyMutation, true)
+  container.addEventListener('keydown', preventReadOnlyKeyMutation, true)
+  applyReadOnlyState()
+  updateActiveTocIndexFromScroll()
 
   // Clicking the hover-to-copy affordance on a heading emits `heading-copy-link`
   // with the heading's stable slug; copy the matching GitHub anchor to the
@@ -2015,8 +2100,17 @@ onBeforeUnmount(() => {
   if (scrollHandler && editor.value) {
     const container = getScrollContainer()
     container?.removeEventListener('scroll', scrollHandler)
+    container?.removeEventListener('beforeinput', preventReadOnlyMutation, true)
+    container?.removeEventListener('paste', preventReadOnlyMutation, true)
+    container?.removeEventListener('cut', preventReadOnlyMutation, true)
+    container?.removeEventListener('drop', preventReadOnlyMutation, true)
+    container?.removeEventListener('keydown', preventReadOnlyKeyMutation, true)
   }
   scrollHandler = null
+  if (tocScrollFrame != null) {
+    cancelAnimationFrame(tocScrollFrame)
+    tocScrollFrame = null
+  }
 
   resizeObserverForEditor.disconnect()
 

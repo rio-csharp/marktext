@@ -47,6 +47,10 @@ export const toggleFocusMode = (win: Win): void => {
   toggleTypeMode(win, 'focus')
 }
 
+export const toggleReadOnlyMode = (win: Win): void => {
+  toggleTypeMode(win, 'readOnly')
+}
+
 export const toggleSourceCodeMode = (win: Win): void => {
   toggleTypeMode(win, 'sourceCode')
 }
@@ -85,6 +89,7 @@ export const loadViewCommands = (commandManager: CommandManager): void => {
   commandManager.add(COMMANDS.VIEW_COMMAND_PALETTE, showCommandPalette)
   commandManager.add(COMMANDS.VIEW_FOCUS_MODE, toggleFocusMode)
   commandManager.add(COMMANDS.VIEW_FORCE_RELOAD_IMAGES, reloadImageCache)
+  commandManager.add(COMMANDS.VIEW_READ_ONLY_MODE, toggleReadOnlyMode)
   commandManager.add(COMMANDS.VIEW_SOURCE_CODE_MODE, toggleSourceCodeMode)
   commandManager.add(COMMANDS.VIEW_TOGGLE_SIDEBAR, toggleSidebar)
   commandManager.add(COMMANDS.VIEW_TOGGLE_TABBAR, toggleTabBar)
@@ -109,11 +114,13 @@ export const viewLayoutChanged = (
   changes: Record<string, unknown>
 ): void => {
   const disableMenuByName = (id: string, value: boolean): void => {
-    const menuItem: MenuItem = applicationMenu.getMenuItemById(id)!
+    const menuItem: MenuItem | null = applicationMenu.getMenuItemById(id)
+    if (!menuItem) return
     menuItem.enabled = value
   }
   const changeMenuByName = (id: string, value: unknown): void => {
-    const menuItem: MenuItem = applicationMenu.getMenuItemById(id)!
+    const menuItem: MenuItem | null = applicationMenu.getMenuItemById(id)
+    if (!menuItem) return
     menuItem.checked = !!value
   }
 
@@ -139,6 +146,9 @@ export const viewLayoutChanged = (
         break
       case 'focus':
         changeMenuByName(focusModeMenuItemId, value)
+        break
+      case 'readOnly':
+        changeMenuByName('readOnlyModeMenuItem', value)
         break
     }
   }

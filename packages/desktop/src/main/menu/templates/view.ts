@@ -46,6 +46,16 @@ export default function(keybindings: Keybindings): MenuItemConstructorOptions {
       }
     },
     {
+      id: 'readOnlyModeMenuItem',
+      label: t('menu.view.readOnlyMode'),
+      accelerator: keybindings.getAccelerator('view.read-only-mode') ?? undefined,
+      type: 'checkbox',
+      checked: false,
+      click(_item, focusedWindow) {
+        actions.toggleReadOnlyMode(focusedWindow as BrowserWindow | undefined)
+      }
+    },
+    {
       type: 'separator'
     },
     {

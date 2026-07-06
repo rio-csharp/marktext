@@ -1,7 +1,6 @@
 <template>
   <div
     class="editor-with-tabs"
-    :style="{ 'max-width': `calc(100vw - ${effectiveSideBarWidth}px)` }"
   >
     <tabs v-show="showTabBar" />
     <div class="container">
@@ -17,18 +16,18 @@
         :muya-index-cursor="muyaIndexCursor"
         :text-direction="textDirection"
       />
+      <file-navigation />
     </div>
     <tab-notifications />
   </div>
 </template>
 
 <script setup lang="ts">
-import { useLayoutStore } from '@/store/layout'
-import { storeToRefs } from 'pinia'
 import Tabs from './tabs.vue'
 import Editor from './editor.vue'
 import SourceCode from './sourceCode.vue'
 import TabNotifications from './notifications.vue'
+import FileNavigation from './fileNavigation.vue'
 
 defineProps<{
   markdown: string
@@ -43,7 +42,6 @@ defineProps<{
   platform: string
 }>()
 
-const { effectiveSideBarWidth } = storeToRefs(useLayoutStore())
 </script>
 
 <style scoped>
@@ -51,12 +49,14 @@ const { effectiveSideBarWidth } = storeToRefs(useLayoutStore())
   position: relative;
   height: 100%;
   flex: 1;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
 
   overflow: hidden;
   background: var(--editorBgColor);
   & > .container {
+    position: relative;
     flex: 1;
     overflow: hidden;
   }

@@ -600,6 +600,12 @@ const commands: CommandDescriptor[] = [
     }
   },
   {
+    id: 'view.read-only-mode',
+    execute: async() => {
+      bus.emit('view:toggle-view-entry', 'readOnly')
+    }
+  },
+  {
     id: 'view.toggle-sidebar',
     execute: async() => {
       bus.emit('view:toggle-layout-entry', 'showSideBar')
