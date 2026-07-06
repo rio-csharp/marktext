@@ -34,6 +34,7 @@
       <rename />
       <import-modal />
     </div>
+    <outline-panel v-if="init" />
   </div>
 </template>
 
@@ -46,6 +47,7 @@ import Recent from '@/components/recent/index.vue'
 import EditorWithTabs from '@/components/editorWithTabs/index.vue'
 import TitleBar from '@/components/titleBar/index.vue'
 import SideBar from '@/components/sideBar/index.vue'
+import OutlinePanel from '@/components/outlinePanel/index.vue'
 import AboutDialog from '@/components/about/index.vue'
 import CommandPalette from '@/components/commandPalette/index.vue'
 import ExportSettingDialog from '@/components/exportSettings/index.vue'

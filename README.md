@@ -15,6 +15,24 @@
 
 <br>
 
+## Fork Notice
+
+This repository is a redistribution fork of the original MarkText project:
+https://github.com/marktext/marktext
+
+The original project is licensed under the MIT License. This fork keeps the
+original copyright and license notice intact.
+
+### Differences from upstream
+
+- The table of contents is shown as an independent outline panel on the right
+  side of the editor instead of being embedded in the sidebar.
+- The View menu toggles the right-side outline panel and preserves its checked
+  state across menu rebuilds.
+- The outline panel unmounts its table-of-contents tree while hidden to avoid
+  unnecessary rendering work on large documents.
+- End-to-end coverage was updated for the independent outline panel behavior.
+
 <div align="center">
   <!-- License -->
   <a href="LICENSE">

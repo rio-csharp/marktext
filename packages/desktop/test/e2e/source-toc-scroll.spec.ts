@@ -12,7 +12,9 @@ const buildLongDoc = (): string => {
   const parts: string[] = []
   for (let i = 1; i <= HEADING_COUNT; i++) {
     parts.push(`# Heading Number ${i}`)
-    for (let p = 0; p < 6; p++) parts.push(`Filler paragraph ${p} under heading ${i}. Lorem ipsum dolor.`)
+    for (let p = 0; p < 6; p++) {
+      parts.push(`Filler paragraph ${p} under heading ${i}. Lorem ipsum dolor.`)
+    }
   }
   return parts.join('\n\n') + '\n'
 }
@@ -29,10 +31,23 @@ const headingLineTopInViewport = (page: Page, text: string): Promise<number | nu
   page.evaluate((needle) => {
     const container = document.querySelector('.source-code') as HTMLElement | null
     const lines = Array.from(document.querySelectorAll('.source-code .CodeMirror-line'))
-    const target = lines.find((l) => (l.textContent || '').includes(needle)) as HTMLElement | undefined
+    const target = lines.find((l) => (l.textContent || '').includes(needle)) as
+      | HTMLElement
+      | undefined
     if (!container || !target) return null
     return Math.round(target.getBoundingClientRect().top - container.getBoundingClientRect().top)
   }, `# ${text}`)
+
+const ensureOutlineVisible = async(app: ElectronApplication, page: Page): Promise<void> => {
+  const visible = await page.locator('.outline-panel').isVisible()
+  if (visible) return
+
+  await clickMenuById(app, 'tocMenuItem')
+  await page.waitForSelector('.outline-panel .side-bar-toc', {
+    state: 'visible',
+    timeout: 5000
+  })
+}
 
 test.describe('Source Code mode: TOC click scrolls to the heading at the top', () => {
   let app: ElectronApplication
@@ -49,7 +64,7 @@ test.describe('Source Code mode: TOC click scrolls to the heading at the top', (
       return !!(el && el.offsetParent !== null)
     })
     if (!sbVisible) await clickMenuById(app, 'sideBarMenuItem')
-    await clickMenuById(app, 'tocMenuItem')
+    await ensureOutlineVisible(app, page)
     await page.waitForSelector('.side-bar-toc .el-tree', { state: 'visible', timeout: 10000 })
     await page.waitForFunction(
       (c) => document.querySelectorAll('.side-bar-toc .el-tree-node__label').length >= c,

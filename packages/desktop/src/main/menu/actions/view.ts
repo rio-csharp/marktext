@@ -64,7 +64,9 @@ export const showTabBar = (win: Win): void => {
 }
 
 export const showTableOfContents = (win: Win): void => {
-  setLayout(win, 'rightColumn', 'toc')
+  if (win && win.webContents) {
+    win.webContents.send('mt::toggle-outline-panel')
+  }
 }
 
 export const toggleTypewriterMode = (win: Win): void => {
@@ -123,6 +125,9 @@ export const viewLayoutChanged = (
         break
       case 'showTabBar':
         changeMenuByName('tabBarMenuItem', value)
+        break
+      case 'showOutlinePanel':
+        changeMenuByName('tocMenuItem', value)
         break
       case 'sourceCode':
         changeMenuByName('sourceCodeModeMenuItem', !!value)
