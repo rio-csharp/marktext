@@ -20,20 +20,17 @@ const { showOutlinePanel, outlinePanelWidth } = storeToRefs(layoutStore)
 <style scoped>
 .outline-panel {
   display: flex;
+  flex-direction: column;
   flex-shrink: 0;
   flex-grow: 0;
   height: 100vh;
   min-width: 220px;
   position: relative;
+  z-index: 1;
   color: var(--sideBarColor);
   user-select: none;
   background: var(--sideBarBgColor);
   border-left: 1px solid var(--itemBgColor);
   overflow: hidden;
-}
-
-.outline-panel :deep(.side-bar-toc) {
-  height: 100%;
-  width: 100%;
 }
 </style>

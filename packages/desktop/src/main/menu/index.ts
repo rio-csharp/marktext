@@ -187,8 +187,9 @@ class AppMenu {
     const { windowMenus } = this
     windowMenus.set(window.id, this._buildEditorMenu())
 
-    const entry = windowMenus.get(window.id)!
-    const menu = entry.menu!
+    const entry = windowMenus.get(window.id)
+    const menu = entry?.menu
+    if (!menu) return
 
     // Set source-code editor if preferred.
     const sourceCodeModeMenuItem = menu.getMenuItemById('sourceCodeModeMenuItem')
@@ -296,6 +297,7 @@ class AppMenu {
       updateMenuItem(oldMenu, newMenu, 'sourceCodeModeMenuItem')
       updateMenuItem(oldMenu, newMenu, 'typewriterModeMenuItem')
       updateMenuItem(oldMenu, newMenu, 'focusModeMenuItem')
+      updateMenuItem(oldMenu, newMenu, 'readOnlyModeMenuItem')
       updateMenuItem(oldMenu, newMenu, 'sideBarMenuItem')
       updateMenuItem(oldMenu, newMenu, 'tabBarMenuItem')
       updateMenuItem(oldMenu, newMenu, 'tocMenuItem')
@@ -329,6 +331,7 @@ class AppMenu {
         updateMenuItem(oldMenu, rebuilt, 'sourceCodeModeMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'typewriterModeMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'focusModeMenuItem')
+        updateMenuItem(oldMenu, rebuilt, 'readOnlyModeMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'sideBarMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'tabBarMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'tocMenuItem')

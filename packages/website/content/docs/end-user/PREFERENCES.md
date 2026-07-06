@@ -14,7 +14,7 @@ Preferences can be controlled and modified in the settings window or via the `pr
 | zoom                   | Number  | `1.0`         | The zoom level. Between `0.5` and `2.0` inclusive.                                                                         |
 | hideScrollbar          | Boolean | `false`       | Whether to hide scrollbars.                                                                                                |
 | wordWrapInToc          | Boolean | `false`       | Whether to enable word wrap in the table of contents.                                                                      |
-| fileSortBy             | String  | `modified`    | Sort files in the opened folder. Optional values: `created`, `modified`, `title`.                                          |
+| fileSortBy             | String  | `title`       | Sort files in the opened folder. Optional values: `created`, `modified`, `title`.                                          |
 | fileSortOrder          | String  | `asc`         | Sort order for files in opened folders: `asc` (ascending) or `desc` (descending).                                          |
 | startUpAction          | String  | `restoreAll`  | The action when MarkText launches. Optional values: `folder`, `openLastFolder`, `blank`, `restoreAll`.                     |
 | defaultDirectoryToOpen | String  | `""`          | The path that should be opened when `startUpAction=folder`.                                                                |

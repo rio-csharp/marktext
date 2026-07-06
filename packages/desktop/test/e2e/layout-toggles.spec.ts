@@ -122,20 +122,23 @@ test.describe('Layout panel toggles', () => {
       { timeout: 5000 }
     )
 
-    const { editorWidth, sideBarWidth, viewportWidth } = await page.evaluate(() => {
+    const { editorWidth, sideBarWidth, outlineWidth, viewportWidth } = await page.evaluate(() => {
       const editor = document.querySelector('.editor-with-tabs') as HTMLElement | null
       const sb = document.querySelector('.side-bar') as HTMLElement | null
+      const outline = document.querySelector('.outline-panel') as HTMLElement | null
       return {
         editorWidth: editor ? editor.getBoundingClientRect().width : 0,
         sideBarWidth: sb ? sb.getBoundingClientRect().width : 0,
+        outlineWidth:
+          outline && outline.offsetParent !== null ? outline.getBoundingClientRect().width : 0,
         viewportWidth: window.innerWidth
       }
     })
     // Sidebar is the 45px icon strip (+1px border). The editor must consume
-    // the remaining viewport width — before the fix it was capped by the
-    // store's `sideBarWidth` (clamped to ≥220), leaving a 175+ px gap to the
-    // right of the editor.
+    // the remaining viewport width after visible side panels are accounted for.
+    // Before the fix it was capped by the store's `sideBarWidth` (clamped to
+    // ≥220), leaving a 175+ px gap to the right of the editor.
     expect(sideBarWidth).toBeLessThanOrEqual(50)
-    expect(Math.abs(editorWidth - (viewportWidth - sideBarWidth))).toBeLessThanOrEqual(1)
+    expect(Math.abs(editorWidth - (viewportWidth - sideBarWidth - outlineWidth))).toBeLessThanOrEqual(1)
   })
 })

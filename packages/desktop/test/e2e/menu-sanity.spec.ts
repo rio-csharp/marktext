@@ -48,6 +48,7 @@ test.describe('Application menu wiring', () => {
       'sourceCodeModeMenuItem',
       'typewriterModeMenuItem',
       'focusModeMenuItem',
+      'readOnlyModeMenuItem',
       'sideBarMenuItem',
       'tabBarMenuItem',
       'tocMenuItem',
