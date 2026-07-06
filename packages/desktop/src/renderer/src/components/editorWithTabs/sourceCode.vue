@@ -42,7 +42,6 @@ const editor = ref<CMInstance>(null)
 const commitTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const viewDestroyed = ref(false)
 const tabId = ref<string | null>(null)
-let sourceScrollFrame: number | null = null
 
 const { theme, sourceCode, readOnly } = storeToRefs(preferencesStore)
 const { currentFile: currentTab } = storeToRefs(editorStore)
@@ -323,31 +322,6 @@ const handleScrollToHeader = (slug: unknown) => {
   scrollSourceEditorToLine(editor.value, line, sourceCodeContainer.value)
 }
 
-const updateActiveTocIndexFromSourceScroll = () => {
-  if (!editor.value || !sourceCodeContainer.value || editorStore.listToc.length === 0) {
-    editorStore.SET_ACTIVE_TOC_INDEX(-1)
-    return
-  }
-
-  const lineAtTop = editor.value.lineAtHeight(sourceCodeContainer.value.scrollTop + 160, 'local')
-  let activeIndex = 0
-  for (let index = 0; index < editorStore.listToc.length; index++) {
-    const line = findMarkdownHeadingLine(editor.value.getValue(), index)
-    if (line >= 0 && line <= lineAtTop) {
-      activeIndex = index
-    }
-  }
-  editorStore.SET_ACTIVE_TOC_INDEX(activeIndex)
-}
-
-const handleSourceScroll = () => {
-  if (sourceScrollFrame != null) return
-  sourceScrollFrame = requestAnimationFrame(() => {
-    sourceScrollFrame = null
-    updateActiveTocIndexFromSourceScroll()
-  })
-}
-
 watch(readOnly, (value) => {
   editor.value?.setOption('readOnly', value)
 })
@@ -420,8 +394,6 @@ onMounted(() => {
 
   editor.value = codeMirrorInstance
   tabId.value = id
-  sourceCodeContainer.value?.addEventListener('scroll', handleSourceScroll, { passive: true })
-  updateActiveTocIndexFromSourceScroll()
 
   listenChange()
 })
@@ -438,11 +410,6 @@ onBeforeUnmount(() => {
   bus.off('redo', handleRedo)
   bus.off('image-action', handleImageAction)
   bus.off('scroll-to-header', handleScrollToHeader)
-  sourceCodeContainer.value?.removeEventListener('scroll', handleSourceScroll)
-  if (sourceScrollFrame != null) {
-    cancelAnimationFrame(sourceScrollFrame)
-    sourceScrollFrame = null
-  }
 
   const { cursor, markdown: newMarkdown } = getMarkdownAndCursor(editor.value)
   if (!readOnly.value) {

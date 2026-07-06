@@ -124,7 +124,7 @@ import { isOsx, animatedScrollTo } from '@/util'
 import { moveImageToFolder, uploadImage } from '@/util/fileSystem'
 import { guessClipboardFilePath } from '@/util/clipboard'
 import { getCssForOptions, getHtmlToc, type PdfCssOptions, type HtmlTocOptions } from '@/util/pdf'
-import { TOP_LEVEL_HEADINGS_SELECTOR, resolveTocHeadingElement } from '@/util/tocNavigation'
+import { resolveTocHeadingElement } from '@/util/tocNavigation'
 import { addCommonStyle, setEditorWidth } from '@/util/theme'
 import { usePreferencesStore } from '@/store/preferences'
 import { useEditorStore } from '@/store/editor'
@@ -286,7 +286,6 @@ let switchLanguageCommand: SpellcheckerLanguageCommand | null = null
 let imageViewer: SimpleImageViewer | null = null
 // The engine has no `scroll` event; we listen on the scroll container directly.
 let scrollHandler: ((e: Event) => void) | null = null
-let tocScrollFrame: number | null = null
 
 // The engine's undo/redo history (`getHistory()`) has a different shape than
 // the desktop store's `tab.history` (which drives the save/dirty tracking and
@@ -1276,24 +1275,6 @@ const scrollElementIntoView = (anchor: Element | null | undefined, duration = 30
   animatedScrollTo(container, container.scrollTop + y - STANDAR_Y, duration)
 }
 
-const updateActiveTocIndexFromScroll = (): void => {
-  const container = getScrollContainer()
-  if (!container || editorStore.listToc.length === 0) {
-    editorStore.SET_ACTIVE_TOC_INDEX(-1)
-    return
-  }
-
-  const containerTop = container.getBoundingClientRect().top
-  const headings = Array.from(container.querySelectorAll(TOP_LEVEL_HEADINGS_SELECTOR))
-  let activeIndex = 0
-  headings.forEach((heading, index) => {
-    if (heading.getBoundingClientRect().top - containerTop <= STANDAR_Y) {
-      activeIndex = index
-    }
-  })
-  editorStore.SET_ACTIVE_TOC_INDEX(activeIndex)
-}
-
 const scrollToHighlight = () => {
   return scrollToElement('.mu-highlight')
 }
@@ -1965,11 +1946,6 @@ onMounted(() => {
     if (currentFile.value) {
       editorStore.updateScrollPosition(currentFile.value.id, container.scrollTop)
     }
-    if (tocScrollFrame != null) return
-    tocScrollFrame = requestAnimationFrame(() => {
-      tocScrollFrame = null
-      updateActiveTocIndexFromScroll()
-    })
   }
   container.addEventListener('scroll', scrollHandler, { passive: true })
   container.addEventListener('beforeinput', preventReadOnlyMutation, true)
@@ -1978,7 +1954,6 @@ onMounted(() => {
   container.addEventListener('drop', preventReadOnlyMutation, true)
   container.addEventListener('keydown', preventReadOnlyKeyMutation, true)
   applyReadOnlyState()
-  updateActiveTocIndexFromScroll()
 
   // Clicking the hover-to-copy affordance on a heading emits `heading-copy-link`
   // with the heading's stable slug; copy the matching GitHub anchor to the
@@ -2107,10 +2082,6 @@ onBeforeUnmount(() => {
     container?.removeEventListener('keydown', preventReadOnlyKeyMutation, true)
   }
   scrollHandler = null
-  if (tocScrollFrame != null) {
-    cancelAnimationFrame(tocScrollFrame)
-    tocScrollFrame = null
-  }
 
   resizeObserverForEditor.disconnect()
 

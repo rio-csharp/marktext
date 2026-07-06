@@ -142,7 +142,6 @@ export interface EditorState {
   tabIdToIndex: Record<string, number>
   listToc: TocItem[]
   toc: TocTreeNode[]
-  activeTocIndex: number
 }
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -153,8 +152,7 @@ export const useEditorStore = defineStore('editor', {
     tabs: [],
     tabIdToIndex: {},
     listToc: [], // Used for equal check and for searching for the correct github-slug to jump to
-    toc: [],
-    activeTocIndex: -1
+    toc: []
   }),
 
   actions: {
@@ -1387,17 +1385,6 @@ export const useEditorStore = defineStore('editor', {
     UPDATE_TOC(toc: TocItem[]): void {
       this.listToc = toc ?? []
       this.toc = listToTree<TocItem>(toc ?? [])
-      if (this.activeTocIndex >= this.listToc.length) {
-        this.activeTocIndex = this.listToc.length - 1
-      }
-    },
-
-    SET_ACTIVE_TOC_INDEX(index: number): void {
-      if (this.listToc.length === 0) {
-        this.activeTocIndex = -1
-        return
-      }
-      this.activeTocIndex = Math.min(Math.max(index, 0), this.listToc.length - 1)
     },
 
     // Content change from realtime preview editor and source code editor
@@ -1448,9 +1435,6 @@ export const useEditorStore = defineStore('editor', {
       if (id === this.currentFile?.id && toc && !equal(toc, this.listToc)) {
         this.listToc = toc
         this.toc = listToTree<TocItem>(toc)
-        if (this.activeTocIndex >= this.listToc.length) {
-          this.activeTocIndex = this.listToc.length - 1
-        }
       }
 
       const lastEditIndex = tab.history.lastEditIndex
