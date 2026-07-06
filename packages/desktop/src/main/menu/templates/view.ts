@@ -72,6 +72,8 @@ export default function(keybindings: Keybindings): MenuItemConstructorOptions {
       label: t('menu.view.toggleTableOfContents'),
       id: 'tocMenuItem',
       accelerator: keybindings.getAccelerator('view.toggle-toc') ?? undefined,
+      type: 'checkbox',
+      checked: true,
       click(_, focusedWindow) {
         actions.showTableOfContents(focusedWindow as BrowserWindow | undefined)
       }

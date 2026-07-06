@@ -9,6 +9,8 @@ interface LayoutPartial {
   showSideBar?: boolean
   showTabBar?: boolean
   sideBarWidth?: number | string
+  showOutlinePanel?: boolean
+  outlinePanelWidth?: number | string
 }
 
 interface SetLayoutOptions {
@@ -25,6 +27,8 @@ interface BufferedLayout {
   showSideBar: boolean
   showTabBar: boolean
   sideBarWidth: number
+  showOutlinePanel: boolean
+  outlinePanelWidth: number
 }
 
 const createBufferedLayoutState = (state: unknown): BufferedLayout | null => {
@@ -38,18 +42,24 @@ const createBufferedLayoutState = (state: unknown): BufferedLayout | null => {
     rightColumn: s.rightColumn,
     showSideBar: !!s.showSideBar,
     showTabBar: !!s.showTabBar,
-    sideBarWidth: normalizeSideBarWidth(s.sideBarWidth)
+    sideBarWidth: normalizeSideBarWidth(s.sideBarWidth),
+    showOutlinePanel: s.showOutlinePanel !== undefined ? !!s.showOutlinePanel : true,
+    outlinePanelWidth: normalizeSideBarWidth(s.outlinePanelWidth)
   }
 }
 
 const initialWidth = localStorage.getItem('side-bar-width')
 const initialSideBarWidth = normalizeSideBarWidth(initialWidth)
+const initialOutlinePanelWidth = localStorage.getItem('outline-panel-width')
+const initialOutlinePanelWidthValue = normalizeSideBarWidth(initialOutlinePanelWidth)
 
 export const useLayoutStore = defineStore('layout', () => {
   const rightColumn = ref<string>('files')
   const showSideBar = ref(false)
   const showTabBar = ref(false)
   const sideBarWidth = ref<number>(initialSideBarWidth)
+  const showOutlinePanel = ref<boolean>(true)
+  const outlinePanelWidth = ref<number>(initialOutlinePanelWidthValue)
 
   // Actual rendered sidebar width. `sideBarWidth` is the right-column width
   // (clamped to ≥220 by `normalizeSideBarWidth`); when `rightColumn` is empty
@@ -84,7 +94,9 @@ export const useLayoutStore = defineStore('layout', () => {
     if (layout.rightColumn !== undefined) rightColumn.value = layout.rightColumn
     if (layout.showSideBar !== undefined) showSideBar.value = !!layout.showSideBar
     if (layout.showTabBar !== undefined) showTabBar.value = !!layout.showTabBar
+    if (layout.showOutlinePanel !== undefined) showOutlinePanel.value = !!layout.showOutlinePanel
     if (layout.sideBarWidth !== undefined) sideBarWidth.value = layout.sideBarWidth as number
+    if (layout.outlinePanelWidth !== undefined) outlinePanelWidth.value = layout.outlinePanelWidth as number
     if (scheduleBufferUpdate) {
       debouncedSendBufferedState()
     }
@@ -95,7 +107,9 @@ export const useLayoutStore = defineStore('layout', () => {
       rightColumn: rightColumn.value,
       showSideBar: showSideBar.value,
       showTabBar: showTabBar.value,
-      sideBarWidth: sideBarWidth.value
+      sideBarWidth: sideBarWidth.value,
+      showOutlinePanel: showOutlinePanel.value,
+      outlinePanelWidth: outlinePanelWidth.value
     })
   }
 
@@ -104,18 +118,20 @@ export const useLayoutStore = defineStore('layout', () => {
     if (!layout) return
 
     SET_SIDE_BAR_WIDTH(layout.sideBarWidth, { scheduleBufferUpdate: false })
+    SET_OUTLINE_PANEL_WIDTH(layout.outlinePanelWidth, { scheduleBufferUpdate: false })
     SET_LAYOUT(
       {
         rightColumn: layout.rightColumn,
         showSideBar: layout.showSideBar,
-        showTabBar: layout.showTabBar
+        showTabBar: layout.showTabBar,
+        showOutlinePanel: layout.showOutlinePanel
       },
       { scheduleBufferUpdate: false }
     )
     DISPATCH_LAYOUT_MENU_ITEMS()
   }
 
-  function TOGGLE_LAYOUT_ENTRY(entryName: 'showSideBar' | 'showTabBar'): void {
+  function TOGGLE_LAYOUT_ENTRY(entryName: 'showSideBar' | 'showTabBar' | 'showOutlinePanel'): void {
     if (entryName === 'showSideBar') {
       showSideBar.value = !showSideBar.value
       const preferencesStore = usePreferencesStore()
@@ -125,6 +141,8 @@ export const useLayoutStore = defineStore('layout', () => {
       })
     } else if (entryName === 'showTabBar') {
       showTabBar.value = !showTabBar.value
+    } else if (entryName === 'showOutlinePanel') {
+      showOutlinePanel.value = !showOutlinePanel.value
     }
     debouncedSendBufferedState()
   }
@@ -157,16 +175,21 @@ export const useLayoutStore = defineStore('layout', () => {
     })
 
     window.electron.ipcRenderer.on('mt::toggle-view-layout-entry', (_e, entryName) => {
-      TOGGLE_LAYOUT_ENTRY(entryName as 'showSideBar' | 'showTabBar')
+      TOGGLE_LAYOUT_ENTRY(entryName as 'showSideBar' | 'showTabBar' | 'showOutlinePanel')
+      DISPATCH_LAYOUT_MENU_ITEMS()
+    })
+
+    window.electron.ipcRenderer.on('mt::toggle-outline-panel', () => {
+      TOGGLE_LAYOUT_ENTRY('showOutlinePanel')
       DISPATCH_LAYOUT_MENU_ITEMS()
     })
 
     bus.on('view:toggle-layout-entry', (entryName: unknown) => {
-      const name = entryName as 'showSideBar' | 'showTabBar'
+      const name = entryName as 'showSideBar' | 'showTabBar' | 'showOutlinePanel'
       TOGGLE_LAYOUT_ENTRY(name)
       const { windowId } = window.marktext?.env ?? {}
       window.electron.ipcRenderer.send('mt::view-layout-changed', Number(windowId), {
-        [name]: name === 'showSideBar' ? showSideBar.value : showTabBar.value
+        [name]: name === 'showSideBar' ? showSideBar.value : name === 'showTabBar' ? showTabBar.value : showOutlinePanel.value
       })
     })
   }
@@ -175,7 +198,8 @@ export const useLayoutStore = defineStore('layout', () => {
     const { windowId } = window.marktext?.env ?? {}
     window.electron.ipcRenderer.send('mt::view-layout-changed', Number(windowId), {
       showTabBar: showTabBar.value,
-      showSideBar: showSideBar.value
+      showSideBar: showSideBar.value,
+      showOutlinePanel: showOutlinePanel.value
     })
   }
 
@@ -183,10 +207,24 @@ export const useLayoutStore = defineStore('layout', () => {
     SET_SIDE_BAR_WIDTH(width)
   }
 
+  function SET_OUTLINE_PANEL_WIDTH(
+    width: number | string,
+    { scheduleBufferUpdate = true }: SetLayoutOptions = {}
+  ): void {
+    const normalizedWidth = normalizeSideBarWidth(width)
+    localStorage.setItem('outline-panel-width', String(normalizedWidth))
+    outlinePanelWidth.value = normalizedWidth
+    if (scheduleBufferUpdate) {
+      debouncedSendBufferedState()
+    }
+  }
+
   return {
     rightColumn,
     showSideBar,
     showTabBar,
+    showOutlinePanel,
+    outlinePanelWidth,
     sideBarWidth,
     effectiveSideBarWidth,
     SET_LAYOUT,
@@ -196,6 +234,7 @@ export const useLayoutStore = defineStore('layout', () => {
     SET_SIDE_BAR_WIDTH,
     LISTEN_FOR_LAYOUT,
     DISPATCH_LAYOUT_MENU_ITEMS,
-    CHANGE_SIDE_BAR_WIDTH
+    CHANGE_SIDE_BAR_WIDTH,
+    SET_OUTLINE_PANEL_WIDTH
   }
 })
