@@ -209,6 +209,12 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function LISTEN_FOR_SIDEBAR_CONTEXT_MENU(): void {
+    bus.on('SIDEBAR::copy-path', () => {
+      const { pathname } = activeItem.value
+      if (typeof pathname === 'string' && pathname) {
+        window.electron.clipboard.writeText(pathname)
+      }
+    })
     bus.on('SIDEBAR::show-in-folder', () => {
       const { pathname } = activeItem.value
       window.electron.shell.showItemInFolder(pathname)

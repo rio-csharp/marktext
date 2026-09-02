@@ -56,6 +56,15 @@ export const getRENAME = () => ({
   }
 })
 
+export const getCopyPath = () => ({
+  label: t('contextMenu.sideBar.copyPath'),
+  id: 'copyPathMenuItem',
+  click(_menuItem: unknown, _browserWindow: unknown) {
+    contextMenu.copyPath()
+  },
+  enabled: true
+})
+
 export const getDELETE = () => ({
   label: t('contextMenu.sideBar.moveToTrash'),
   id: 'deleteMenuItem',
@@ -79,5 +88,6 @@ export const COPY = getCOPY()
 export const CUT = getCUT()
 export const PASTE = getPASTE()
 export const RENAME = getRENAME()
+export const COPY_PATH = getCopyPath()
 export const DELETE = getDELETE()
 export const SHOW_IN_FOLDER = getShowInFolder()

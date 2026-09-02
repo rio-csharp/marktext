@@ -198,6 +198,7 @@
       "cut": "剪切",
       "paste": "粘贴",
       "rename": "重命名",
+      "copyPath": "复制路径",
       "moveToTrash": "移动到废纸篓",
       "showInFolder": "在文件夹中显示"
     },

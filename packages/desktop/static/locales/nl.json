@@ -197,6 +197,7 @@
       "cut": "Knippen",
       "paste": "Plakken",
       "rename": "Hernoemen",
+      "copyPath": "Pad kopiëren",
       "moveToTrash": "Naar prullenbak",
       "showInFolder": "Tonen in map"
     },

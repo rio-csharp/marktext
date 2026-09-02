@@ -136,7 +136,7 @@ onMounted(() => {
     folderEl.value.addEventListener('contextmenu', (event) => {
       event.preventDefault()
       projectStore.CHANGE_ACTIVE_ITEM(props.folder)
-      showContextMenu(event, !!clipboard.value)
+      showContextMenu(event, !!clipboard.value, !!props.folder.pathname)
     })
   }
   bus.on('SIDEBAR::show-new-input', handleInputFocus)

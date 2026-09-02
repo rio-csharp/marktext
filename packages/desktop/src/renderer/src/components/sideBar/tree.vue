@@ -221,7 +221,7 @@ const createFile = (): void => {
 
 const handleRootContextMenu = (event: MouseEvent): void => {
   projectStore.CHANGE_ACTIVE_ITEM(props.projectTree)
-  showContextMenu(event, !!clipboard.value)
+  showContextMenu(event, !!clipboard.value, !!props.projectTree?.pathname)
 }
 
 const toggleOpenedFiles = (): void => {

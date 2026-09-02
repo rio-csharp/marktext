@@ -198,6 +198,7 @@
       "cut": "Cortar",
       "paste": "Pegar",
       "rename": "Renombrar",
+      "copyPath": "Copiar ruta",
       "moveToTrash": "Mover a la Papelera",
       "showInFolder": "Mostrar en Carpeta"
     },

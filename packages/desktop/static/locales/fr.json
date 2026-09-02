@@ -198,6 +198,7 @@
       "cut": "Couper",
       "paste": "Coller",
       "rename": "Renommer",
+      "copyPath": "Copier le chemin",
       "moveToTrash": "Déplacer vers la corbeille",
       "showInFolder": "Afficher dans le dossier"
     },

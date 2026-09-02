@@ -198,6 +198,7 @@
       "cut": "Kes",
       "paste": "Yapıştır",
       "rename": "Yeniden Adlandır",
+      "copyPath": "Yolu kopyala",
       "moveToTrash": "Çöp Kutusuna Taşı",
       "showInFolder": "Klasörde Göster"
     },

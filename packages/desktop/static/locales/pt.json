@@ -198,6 +198,7 @@
       "cut": "Cortar",
       "paste": "Colar",
       "rename": "Renomear",
+      "copyPath": "Copiar caminho",
       "moveToTrash": "Mover para Lixeira",
       "showInFolder": "Mostrar na Pasta"
     },

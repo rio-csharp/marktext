@@ -198,6 +198,7 @@
       "cut": "Cut",
       "paste": "Paste",
       "rename": "Rename",
+      "copyPath": "Copy path",
       "moveToTrash": "Move To Trash",
       "showInFolder": "Show In Folder"
     },
