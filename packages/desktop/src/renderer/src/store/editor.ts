@@ -1651,20 +1651,19 @@ export const useEditorStore = defineStore('editor', {
     },
 
     LISTEN_FOR_FILE_CHANGE(): void {
-      const preferencesStore = usePreferencesStore()
       window.electron.ipcRenderer.on('mt::update-file', (_, payload) => {
         const { type, change } = payload
         const { tabs } = this
         const { pathname } = change
         const tab = tabs.find((t) => window.fileUtils.isSamePathSync(t.pathname, pathname))
         if (tab) {
-          const { id, isSaved, filename } = tab
+          const { id } = tab
           switch (type) {
             case 'unlink': {
               tab.isSaved = false
               this.pushTabNotification({
                 tabId: id,
-                msg: t('store.editor.fileRemovedOnDisk', { name: filename }),
+                msg: t('store.editor.fileRemovedOnDisk', { name: tab.filename }),
                 style: 'warn',
                 showConfirm: false,
                 exclusiveType: 'file_changed'
@@ -1676,39 +1675,30 @@ export const useEditorStore = defineStore('editor', {
             case 'change': {
               // Only the file's metadata changed on disk (e.g. a git checkout
               // that left the content byte-identical) — there is nothing to
-              // reload and no reason to warn the user (#1861).
+              // reload (#1861).
               const newMarkdown = (change as unknown as FileChangePayload).data?.markdown
               if (typeof newMarkdown === 'string' && newMarkdown === tab.markdown) {
                 break
               }
 
-              const { autoSave } = preferencesStore
-              if (autoSave) {
-                if (autoSaveTimers.has(id)) {
-                  const timer = autoSaveTimers.get(id)
-                  if (timer) clearTimeout(timer)
-                  autoSaveTimers.delete(id)
-                }
-
-                if (isSaved) {
-                  this.loadChange(change as unknown as FileChangePayload)
-                  return
-                }
+              // External change: reload straight away. A pending auto-save
+              // timer would write stale editor content over the new disk
+              // content, so drop it first. `loadChange` records the reload
+              // as one undo boundary, so the first undo restores the
+              // pre-reload document.
+              if (autoSaveTimers.has(id)) {
+                const timer = autoSaveTimers.get(id)
+                if (timer) clearTimeout(timer)
+                autoSaveTimers.delete(id)
               }
 
-              tab.isSaved = false
-              this.pushTabNotification({
-                tabId: id,
-                msg: t('store.editor.fileChangedOnDisk', { name: filename }),
-                showConfirm: true,
-                exclusiveType: 'file_changed',
-                action: (status) => {
-                  if (status) {
-                    this.loadChange(change as unknown as FileChangePayload)
-                  }
-                }
-              })
-              debouncedSendBufferedState()
+              // Drop a stale file-changed banner — the tab now matches disk.
+              const bannerIndex = tab.notifications.findIndex((n) => n.exclusiveType === 'file_changed')
+              if (bannerIndex >= 0) {
+                tab.notifications.splice(bannerIndex, 1)
+              }
+
+              this.loadChange(change as unknown as FileChangePayload)
               break
             }
             default:

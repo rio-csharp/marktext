@@ -35,7 +35,16 @@ describe('useEditorStore LISTEN_FOR_FILE_CHANGE — content-identical change (#1
   })
 
   const makeSavedTab = (store: ReturnType<typeof useEditorStore>) => {
-    const tab = { id: 'tab-1', filename: 'a.md', pathname: '/x/a.md', markdown: 'hello', isSaved: true }
+    const tab = {
+      id: 'tab-1',
+      filename: 'a.md',
+      pathname: '/x/a.md',
+      markdown: 'hello',
+      isSaved: true,
+      notifications: [],
+      scrollTop: 0,
+      history: { stack: [], index: -1 }
+    }
     store.tabs = [tab] as unknown as typeof store.tabs
     store.tabIdToIndex = { 'tab-1': 0 }
     return tab
@@ -48,7 +57,10 @@ describe('useEditorStore LISTEN_FOR_FILE_CHANGE — content-identical change (#1
   }
 
   const fire = (handler: ReturnType<typeof captureHandler>, markdown: string) =>
-    handler(null, { type: 'change', change: { pathname: '/x/a.md', data: { markdown } } })
+    handler(null, {
+      type: 'change',
+      change: { pathname: '/x/a.md', data: { markdown, filename: 'a.md' } }
+    })
 
   it('ignores a change whose content matches the tab (mtime-only change)', () => {
     const store = useEditorStore()
@@ -62,15 +74,16 @@ describe('useEditorStore LISTEN_FOR_FILE_CHANGE — content-identical change (#1
     expect(tab.isSaved).toBe(true)
   })
 
-  it('still warns when the on-disk content actually changed', () => {
+  it('reloads straight away when the on-disk content actually changed', () => {
     const store = useEditorStore()
-    const tab = makeSavedTab(store)
+    makeSavedTab(store)
     const notifySpy = vi.spyOn(store, 'pushTabNotification').mockImplementation(() => {})
+    const loadSpy = vi.spyOn(store, 'loadChange').mockImplementation(() => {})
     store.LISTEN_FOR_FILE_CHANGE()
 
     fire(captureHandler(), 'hello world')
 
-    expect(notifySpy).toHaveBeenCalledTimes(1)
-    expect(tab.isSaved).toBe(false)
+    expect(loadSpy).toHaveBeenCalledTimes(1)
+    expect(notifySpy).not.toHaveBeenCalled()
   })
 })
