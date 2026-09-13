@@ -16,6 +16,17 @@ import type Preference from '../preferences'
 export const WATCHER_STABILITY_THRESHOLD = 1000
 export const WATCHER_STABILITY_POLL_INTERVAL = 150
 
+/**
+ * Path segments pruned from the watcher entirely. Dependency, build-output,
+ * and VCS directories can hold tens of thousands of generated files, each of
+ * which would otherwise trigger a watcher event plus a sidebar update, while
+ * never containing notes worth showing. Anchored to full path segments so
+ * similarly-named notes (e.g. `target-practice.md`) still match. User
+ * patterns from `treePathExcludePatterns` apply on top of this.
+ */
+export const WATCHER_IGNORED_SEGMENTS =
+  /(?:^|[/\\])(?:node_modules|\.git|\.svn|\.hg|target|dist|__pycache__)(?=$|[/\\])|(?:.+\.asar)/
+
 const EVENT_NAME = {
   dir: 'mt::update-object-tree' as const,
   file: 'mt::update-file' as const
@@ -70,19 +81,26 @@ const add = async(
     isMarkdown
   }
   if (isMarkdown) {
-    // HACK: But this should be removed completely in #1034/#1035.
-    try {
-      const data = await loadMarkdownFile(
-        pathname,
-        endOfLine,
-        autoGuessEncoding,
-        trimTrailingNewline,
-        autoNormalizeLineEndings
-      )
-      file.data = data
-    } catch (err) {
-      // Only notify user about opened files.
-      if (type === 'file') {
+    // The directory watcher only lists sidebar nodes, so send metadata only
+    // and skip the full content load (disk read + encoding detection).
+    // Chokidar replays `add` for every existing file at startup; loading all
+    // of them blocked the main thread and spiked launch time on large
+    // folders. Content is read on demand when a file is actually opened. The
+    // single-file watcher still loads content because external-change reload
+    // needs it.
+    if (type === 'file') {
+      // HACK: But this should be removed completely in #1034/#1035.
+      try {
+        const data = await loadMarkdownFile(
+          pathname,
+          endOfLine,
+          autoGuessEncoding,
+          trimTrailingNewline,
+          autoNormalizeLineEndings
+        )
+        file.data = data
+      } catch (err) {
+        // Only notify user about opened files.
         win.webContents.send('mt::show-notification', {
           title: 'Watcher I/O error',
           type: 'error',
@@ -202,10 +220,10 @@ class Watcher {
     const watcher = chokidar.watch(watchPath, {
       ignored: (pathname: string, fileInfo?: { isDirectory: () => boolean }) => {
         if (!fileInfo) {
-          return /(?:^|[/\\])(?:node_modules|(?:.+\.asar))/.test(pathname)
+          return WATCHER_IGNORED_SEGMENTS.test(pathname)
         }
 
-        if (/(?:^|[/\\])(?:node_modules|(?:.+\.asar))/.test(pathname)) {
+        if (WATCHER_IGNORED_SEGMENTS.test(pathname)) {
           return true
         }
 

@@ -163,10 +163,15 @@ export const useProjectStore = defineStore('project', () => {
     const editorStore = useEditorStore()
     switch (type) {
       case 'add': {
-        const { pathname, data, isMarkdown } = change
+        const { pathname, data, isMarkdown, name } = change
         addFile(projectTree.value!, change as Parameters<typeof addFile>[1], String(preferencesStore.fileSortBy), String(preferencesStore.fileSortOrder))
         if (isMarkdown && newFileNameCache.value && pathname === newFileNameCache.value) {
-          const fileState = getFileStateFromData(data as Record<string, unknown>)
+          // Directory `add` events carry metadata only (content loads on
+          // demand when opened), so seed an app-created — always empty —
+          // file from its path. A `data` payload is still honored when
+          // present.
+          const seed = (data ?? { pathname, filename: name, markdown: '' }) as Record<string, unknown>
+          const fileState = getFileStateFromData(seed)
           editorStore.UPDATE_CURRENT_FILE(fileState)
           newFileNameCache.value = ''
         }
