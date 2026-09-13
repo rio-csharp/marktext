@@ -53,6 +53,15 @@ electronLanguages: # Avoid packaging all chromium locales since our app has in-b
 
 asarUnpack:
   - resources/**
+  # @vscode/ripgrep resolves its binary via require.resolve against a
+  # platform-specific optionalDependency. That package must live inside
+  # app.asar so Node can resolve it, but the executable itself has to be
+  # on the real filesystem so child_process.spawn can run it. Unpacking
+  # just the binaries keeps the package metadata in the archive while
+  # making rg.exe available at the app.asar.unpacked path the code already
+  # rewrites to (bootInfo.ts / ripgrep.ts replace app.asar with
+  # app.asar.unpacked).
+  - node_modules/@vscode/ripgrep-*/bin/*
 fileAssociations:
   - ext: md
     name: Markdown

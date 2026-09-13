@@ -23,7 +23,13 @@ export default defineConfig({
         // output. plist 5 ships ESM-only (no CJS `exports` entry), so leaving
         // it externalized makes the main process `require('plist')` throw
         // ERR_PACKAGE_PATH_NOT_EXPORTED at startup.
-        exclude: ['electron-store', 'plist'],
+        //
+        // write-file-atomic is CJS-compatible, but pnpm does not always create
+        // a package-level symlink in packages/desktop/node_modules. When it is
+        // only hoisted to the workspace root, electron-builder cannot discover
+        // it from the desktop package and omits it from app.asar, causing
+        // `require('write-file-atomic')` to fail at runtime.
+        exclude: ['electron-store', 'plist', 'write-file-atomic'],
         include: ['native-keymap']
       }
     },
