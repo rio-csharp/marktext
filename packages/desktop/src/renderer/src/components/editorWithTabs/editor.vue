@@ -1,17 +1,13 @@
 <template>
   <div
     class="editor-wrapper"
-    :class="[{ typewriter: typewriter, focus: focus, source: sourceCode, 'viewer-open': viewerOpen }]"
+    :class="[
+      { typewriter: typewriter, focus: focus, source: sourceCode, 'viewer-open': viewerOpen }
+    ]"
     :dir="textDirection"
   >
-    <div
-      ref="editorRef"
-      class="editor-component"
-    />
-    <media-viewer
-      ref="mediaViewer"
-      @open-change="viewerOpen = $event"
-    />
+    <div ref="editorRef" class="editor-component" />
+    <media-viewer ref="mediaViewer" @open-change="viewerOpen = $event" />
     <el-dialog
       v-model="dialogTableVisible"
       :show-close="isShowClose"
@@ -26,10 +22,7 @@
           {{ t('editor.insertTable.title') }}
         </div>
       </template>
-      <el-form
-        :model="tableChecker"
-        :inline="true"
-      >
+      <el-form :model="tableChecker" :inline="true">
         <el-form-item :label="t('editor.insertTable.rows')">
           <el-input-number
             ref="rowInput"
@@ -55,10 +48,7 @@
           <el-button @click="dialogTableVisible = false">
             {{ t('common.cancel') }}
           </el-button>
-          <el-button
-            type="primary"
-            @click="handleDialogTableConfirm"
-          >
+          <el-button type="primary" @click="handleDialogTableConfirm">
             {{ t('common.ok') }}
           </el-button>
         </div>
@@ -69,7 +59,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, reactive, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from 'vue'
+import {
+  ref,
+  shallowRef,
+  reactive,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+  markRaw
+} from 'vue'
 import log from 'electron-log'
 import {
   Muya,
@@ -226,7 +225,8 @@ const {
   // Edit modes
   typewriter,
   focus,
-  sourceCode
+  sourceCode,
+  readOnly
 } = storeToRefs(preferencesStore)
 
 // Editor store refs
@@ -245,7 +245,7 @@ const defaultFontFamily = DEFAULT_EDITOR_FONT_FAMILY
 const resolveEditorFont = (family: string): string =>
   family ? `${family}, ${defaultFontFamily}` : defaultFontFamily
 const resolveCodeFont = (family: string): string => `${family}, ${DEFAULT_CODE_FONT_FAMILY}`
-const selectionChange = ref<unknown>(null)
+const selectionChange = shallowRef<MuyaChange | null>(null)
 // `shallowRef`: the engine instance is `markRaw`d anyway, and a deep ref
 // would map `Muya` through `UnwrapRef` and lose the class's own type.
 const editor = shallowRef<Muya | null>(null)
@@ -268,6 +268,8 @@ let spellchecker: SpellChecker | null = null
 let switchLanguageCommand: SpellcheckerLanguageCommand | null = null
 // The engine has no `scroll` event; we listen on the scroll container directly.
 let scrollHandler: ((e: Event) => void) | null = null
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null
+let snapshotTabId: string | null = null
 
 // The engine's undo/redo history (`getHistory()`) has a different shape than
 // the desktop store's `tab.history` (which drives the save/dirty tracking and
@@ -462,19 +464,23 @@ watch(focus, (value) => {
 // WYSIWYG engine, so grey them out. On return to WYSIWYG, re-apply the menu
 // state for the CURRENT cursor context (a code block/table still disables some
 // items) rather than blanket-enabling everything (#3531).
-watch(sourceCode, (isSource) => {
+const syncEditorFormatMenus = (): void => {
   const windowId = window.marktext?.env?.windowId ?? -1
-  if (isSource) {
+  if (sourceCode.value || readOnly.value) {
     window.electron.ipcRenderer.send('mt::set-editor-format-menus-enabled', windowId, false)
     return
   }
   nextTick(() => {
-    if (selectionChange.value) {
-      pushSelectionMenuState(selectionChange.value as MuyaChange)
-    } else {
-      window.electron.ipcRenderer.send('mt::set-editor-format-menus-enabled', windowId, true)
-    }
+    if (selectionChange.value) pushSelectionMenuState(selectionChange.value as MuyaChange)
+    else window.electron.ipcRenderer.send('mt::set-editor-format-menus-enabled', windowId, true)
   })
+}
+
+watch(sourceCode, syncEditorFormatMenus)
+watch(readOnly, () => {
+  syncEditorFormatMenus()
+  const container = getScrollContainer()
+  container?.classList.toggle('read-only', readOnly.value)
 })
 
 // nextTick: the rebuilt headings have to be in the DOM before we pair them up.
@@ -546,11 +552,14 @@ watch(sequenceTheme, (value, oldValue) => {
   }
 })
 
-watch(() => preferencesStore.plantumlServer, (value, oldValue) => {
-  if (value !== oldValue && editor.value) {
-    editor.value.setOptions({ plantumlServer: value }, true)
+watch(
+  () => preferencesStore.plantumlServer,
+  (value, oldValue) => {
+    if (value !== oldValue && editor.value) {
+      editor.value.setOptions({ plantumlServer: value }, true)
+    }
   }
-})
+)
 
 watch(listIndentation, (value, oldValue) => {
   if (value !== oldValue && editor.value) {
@@ -1028,6 +1037,7 @@ const openSpellcheckerLanguageCommand = () => {
 }
 
 const replaceMisspelling = (payload: unknown) => {
+  if (readOnly.value) return
   const { word, replacement } = payload as { word: string; replacement: string }
   if (editor.value) {
     editor.value.replaceCurrentWordInlineUnsafe(word, replacement)
@@ -1035,7 +1045,7 @@ const replaceMisspelling = (payload: unknown) => {
 }
 
 const handleUndo = () => {
-  if (sourceCode.value) {
+  if (sourceCode.value || readOnly.value) {
     return
   }
 
@@ -1045,7 +1055,7 @@ const handleUndo = () => {
 }
 
 const handleRedo = () => {
-  if (sourceCode.value) {
+  if (sourceCode.value || readOnly.value) {
     return
   }
 
@@ -1083,6 +1093,7 @@ const COPY_PASTE_METHOD_MAP: Record<string, 'copyAsRich' | 'copyAsHtml' | 'paste
   pasteAsPlainText: 'pasteAsPlainText'
 }
 const handleCopyPaste = (type: unknown) => {
+  if (readOnly.value && type === 'pasteAsPlainText') return
   if (editor.value) {
     const method = COPY_PASTE_METHOD_MAP[type as string]
     if (method) editor.value[method]()
@@ -1090,6 +1101,7 @@ const handleCopyPaste = (type: unknown) => {
 }
 
 const insertImage = (src: unknown) => {
+  if (readOnly.value) return
   if (!sourceCode.value) {
     editor.value && editor.value.insertImage({ src: src as string })
   }
@@ -1120,12 +1132,13 @@ const handleSearch = (payload: unknown) => {
 }
 
 const handReplace = (payload: unknown) => {
-  if (!editor.value) return
+  if (readOnly.value || !editor.value) return
   const { value, opt } = payload as { value: string; opt?: IReplaceOption }
   editorStore.SEARCH(toSearchMatches(editor.value.replace(value, opt)))
 }
 
 const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
+  if (readOnly.value) return
   insertImage(url)
   editorStore.SHOW_IMAGE_DELETION_URL(deletionUrl as string)
 }
@@ -1135,6 +1148,21 @@ const handleUploadedImage = (url: unknown, deletionUrl?: unknown) => {
 // The legacy engine exposed the same element as `muya.container`.
 const getScrollContainer = (): HTMLElement | null =>
   (editor.value?.domNode as HTMLElement | undefined) ?? null
+
+const preventReadOnlyMutation = (event: Event): void => {
+  if (readOnly.value) {
+    event.preventDefault()
+    event.stopPropagation()
+  }
+}
+
+const preventReadOnlyKeyMutation = (event: KeyboardEvent): void => {
+  if (!readOnly.value) return
+  if (event.ctrlKey || event.metaKey || event.altKey) return
+  if (/^(Arrow|Page|Home|End|Escape)/.test(event.key)) return
+  event.preventDefault()
+  event.stopPropagation()
+}
 
 // Viewport-relative caret rect (mirrors the engine's `Selection.getCursorCoords`
 // / legacy `cursorCoords`). Used for typewriter + keep-cursor-visible scrolling
@@ -1407,6 +1435,7 @@ const pushSelectionMenuState = (changes: MuyaChange) => {
 }
 
 const handleEditParagraph = (type: unknown) => {
+  if (readOnly.value) return
   // These commands act on the hidden WYSIWYG engine, so block them in
   // source-code mode (mirrors handleUndo/handleSelectAll) — otherwise e.g. the
   // Insert Table wizard opens and writes to the invisible editor (#3531).
@@ -1433,7 +1462,7 @@ const handleEditParagraph = (type: unknown) => {
 
 // handle `duplicate`, `delete`, `create paragraph below`
 const handleParagraph = (type: unknown) => {
-  if (sourceCode.value) {
+  if (sourceCode.value || readOnly.value) {
     return
   }
   if (editor.value) {
@@ -1454,13 +1483,14 @@ const handleParagraph = (type: unknown) => {
 }
 
 const handleInlineFormat = (type: unknown) => {
-  if (sourceCode.value) {
+  if (sourceCode.value || readOnly.value) {
     return
   }
   editor.value && editor.value.format(type as string)
 }
 
 const handleDialogTableConfirm = () => {
+  if (readOnly.value) return
   dialogTableVisible.value = false
   editor.value && editor.value.createTable(tableChecker)
 }
@@ -1632,6 +1662,7 @@ const handleFileChange = (payload: unknown) => {
 }
 
 const handleInsertParagraph = (location: unknown) => {
+  if (readOnly.value) return
   editor.value && editor.value.insertParagraph(location as Parameters<Muya['insertParagraph']>[0])
 }
 
@@ -1639,8 +1670,34 @@ const blurEditor = () => {
   editor.value?.blur(false, true)
 }
 
+const flushWysiwygSnapshot = (): void => {
+  if (snapshotTimer) {
+    clearTimeout(snapshotTimer)
+    snapshotTimer = null
+  }
+  if (!editor.value || !snapshotTabId || readOnly.value) return
+  const markdown = editor.value.getMarkdown()
+  editorStore.LISTEN_FOR_CONTENT_CHANGE({
+    id: snapshotTabId,
+    markdown,
+    wordCount: muyaWordCount(markdown),
+    cursor: serializeCursor(editor.value.getSelection()),
+    history: makeSyntheticHistory(snapshotTabId, markdown),
+    toc: editor.value.getTOC(),
+    blocks: editor.value.getState()
+  })
+  snapshotTabId = null
+}
+
+const scheduleWysiwygSnapshot = (id: string): void => {
+  snapshotTabId = id
+  if (snapshotTimer) clearTimeout(snapshotTimer)
+  snapshotTimer = setTimeout(flushWysiwygSnapshot, 300)
+}
+
 const flushActiveEditor = () => {
   editor.value?.flush()
+  flushWysiwygSnapshot()
 }
 
 const focusEditor = () => {
@@ -1681,6 +1738,7 @@ const handleModalOpening = () => {
 // Electron 42 Chromium, so insert the saved image at the cursor through the
 // engine (routing via `imageAction` → upload/folder/path).
 const handleScreenShot = (filePath?: unknown) => {
+  if (readOnly.value) return
   if (editor.value && typeof filePath === 'string' && filePath) {
     editor.value.pasteImage(filePath)
   }
@@ -1881,30 +1939,12 @@ onMounted(() => {
   // block AST), so we compute it here — mirroring the legacy engine's
   // `dispatchChange` payload.
   editor.value.on('json-change', () => {
-    // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
-    // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
-    if (!currentFile.value || !editor.value) return
+    if (!currentFile.value || !editor.value || readOnly.value) return
     const { id } = currentFile.value
     if (!id) return
-    const markdown = editor.value.getMarkdown()
-    // Stash the real engine history for in-session tab-switch restoration. The
-    // synthetic save-tracking id is derived from the live document content (a
-    // monotonic, never-reused id — see `syntheticHistory.ts`), NOT the engine
-    // undo-stack depth, which is reused and falsely showed a divergently
-    // re-edited tab as clean (Phase G — G6).
-    const engineHistory = editor.value.getHistory()
-    engineHistoryByTab.set(id, engineHistory)
-    editorStore.LISTEN_FOR_CONTENT_CHANGE({
-      id,
-      markdown,
-      wordCount: muyaWordCount(markdown),
-      cursor: serializeCursor(editor.value.getSelection()),
-      // Synthetic, desktop-shaped history so the store's save/dirty tracking
-      // keeps working (the engine history shape is incompatible).
-      history: makeSyntheticHistory(id, markdown),
-      toc: editor.value.getTOC(),
-      blocks: editor.value.getState()
-    })
+    engineHistoryByTab.set(id, editor.value.getHistory())
+    editorStore.MARK_DIRTY(id)
+    scheduleWysiwygSnapshot(id)
   })
 
   // The engine does not emit `scroll`; listen on the scroll container directly
@@ -1914,7 +1954,14 @@ onMounted(() => {
       editorStore.updateScrollPosition(currentFile.value.id, container.scrollTop)
     }
   }
+  container.setAttribute('contenteditable', readOnly.value ? 'false' : 'true')
+  container.classList.toggle('read-only', readOnly.value)
   container.addEventListener('scroll', scrollHandler, { passive: true })
+  container.addEventListener('beforeinput', preventReadOnlyMutation, true)
+  container.addEventListener('keydown', preventReadOnlyKeyMutation, true)
+  container.addEventListener('paste', preventReadOnlyMutation, true)
+  container.addEventListener('cut', preventReadOnlyMutation, true)
+  container.addEventListener('drop', preventReadOnlyMutation, true)
 
   // Clicking the hover-to-copy affordance on a heading emits `heading-copy-link`
   // with the heading's stable slug; copy the matching GitHub anchor to the
@@ -1987,7 +2034,7 @@ onMounted(() => {
       }
     }
 
-    selectionChange.value = changes
+    selectionChange.value = markRaw(changes)
     if (!sourceCode.value && editor.value) {
       setSelectionWordCountFromText(editor.value.getSelectedText())
     }
@@ -2050,6 +2097,13 @@ onBeforeUnmount(() => {
     container?.removeEventListener('scroll', scrollHandler)
   }
   scrollHandler = null
+  if (snapshotTimer) clearTimeout(snapshotTimer)
+  const container = getScrollContainer()
+  container?.removeEventListener('beforeinput', preventReadOnlyMutation, true)
+  container?.removeEventListener('keydown', preventReadOnlyKeyMutation, true)
+  container?.removeEventListener('paste', preventReadOnlyMutation, true)
+  container?.removeEventListener('cut', preventReadOnlyMutation, true)
+  container?.removeEventListener('drop', preventReadOnlyMutation, true)
 
   resizeObserverForEditor.disconnect()
 
@@ -2129,5 +2183,4 @@ onBeforeUnmount(() => {
   padding-top: calc(50vh - 136px);
   padding-bottom: calc(50vh - 54px);
 }
-
 </style>

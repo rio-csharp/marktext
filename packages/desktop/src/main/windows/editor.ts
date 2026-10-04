@@ -11,7 +11,7 @@ import { TITLE_BAR_HEIGHT, editorWinOptions, isLinux, isOsx } from '../config'
 import { showEditorContextMenu } from '../contextMenu/editor'
 import { loadMarkdownFile } from '../filesystem/markdown'
 import { switchLanguage } from '../spellchecker'
-import fs from 'fs'
+import fs from 'fs/promises'
 
 type RawMarkdownDocument = Awaited<ReturnType<typeof loadMarkdownFile>>
 
@@ -48,6 +48,7 @@ interface RestoredBufferState {
 }
 
 class EditorWindow extends BaseWindow {
+  private _restoreGeneration = 0
   // Root directory and file list to open when the window is ready.
   private _directoryToOpen: string | null
   private _filesToOpen: PendingFile[] | null
@@ -181,7 +182,9 @@ class EditorWindow extends BaseWindow {
       })
 
       if (this.bufferStoreInfo!.filePath) {
-        this._restoreAllState()
+        this._restoreAllState().catch((error) => {
+          log.error('Failed to restore editor state:', error)
+        })
       } else {
         this._doOpenFilesToOpen()
         this._markdownToOpen!.length = 0
@@ -203,7 +206,7 @@ class EditorWindow extends BaseWindow {
       )
     })
 
-    win.webContents.once('render-process-gone', async(_event, { reason }) => {
+    win.webContents.once('render-process-gone', async (_event, { reason }) => {
       if (reason === 'clean-exit') {
         return
       }
@@ -469,6 +472,7 @@ class EditorWindow extends BaseWindow {
   }
 
   override reload(): void {
+    this._restoreGeneration++
     const { id, browserWindow } = this
 
     // Close watchers
@@ -556,17 +560,25 @@ class EditorWindow extends BaseWindow {
     this._filesToOpen!.length = 0
   }
 
-  private _restoreAllState(): void {
+  private async _restoreAllState(): Promise<void> {
     if (this.lifecycle !== WindowLifecycle.READY) {
       throw new Error('Invalid state.')
     }
     const { browserWindow, bufferStoreInfo, _accessor } = this
     const { menu: appMenu, preferences } = _accessor
+    const generation = ++this._restoreGeneration
+    const isCurrent = (): boolean =>
+      generation === this._restoreGeneration &&
+      this.lifecycle === WindowLifecycle.READY &&
+      this.browserWindow === browserWindow &&
+      !!browserWindow &&
+      !browserWindow.isDestroyed()
 
     try {
       const bufferState = JSON.parse(
-        fs.readFileSync(bufferStoreInfo!.filePath!, 'utf-8')
+        await fs.readFile(bufferStoreInfo!.filePath!, 'utf-8')
       ) as RestoredBufferState
+      if (!isCurrent()) return
       if (!bufferState || !Array.isArray(bufferState.tabs)) {
         throw new Error('Invalid editor buffer state.')
       }
@@ -598,6 +610,7 @@ class EditorWindow extends BaseWindow {
             autoNormalizeLineEndings
           )
             .then((rawDocument) => {
+              if (!isCurrent()) return
               if (rawDocument.markdown !== tab.markdown) {
                 // File has changed since it was last opened, if it is not saved, we should NOT override the buffer
                 if (tab.isSaved) {
@@ -611,6 +624,7 @@ class EditorWindow extends BaseWindow {
               }
             })
             .catch((err: Error) => {
+              if (!isCurrent()) return
               const { message, stack } = err
               tab.isSaved = false // Set to false as base file could not be found, needs saving
               log.error(`[ERROR] Cannot open file: ${message}\n\n${stack}`)
@@ -623,19 +637,8 @@ class EditorWindow extends BaseWindow {
         )
       }
 
-      Promise.all(fileOpenRequests)
-        .then(() => {
-          // After all files are loaded, we can send the state to the renderer and open the tabs
-          browserWindow!.webContents.send('mt::load-state', bufferState)
-        })
-        .catch((err: Error) => {
-          log.error('Failed to load files for restoring editor state:', err)
-          browserWindow!.webContents.send('mt::show-notification', {
-            title: 'Failed to restore buffered state',
-            type: 'error',
-            message: err.message
-          })
-        })
+      await Promise.all(fileOpenRequests)
+      if (isCurrent()) browserWindow!.webContents.send('mt::load-state', bufferState)
     } catch (e) {
       log.error('Failed to restore editor state:', e)
     }

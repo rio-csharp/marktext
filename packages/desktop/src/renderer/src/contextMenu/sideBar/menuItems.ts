@@ -56,6 +56,15 @@ export const getRENAME = () => ({
   }
 })
 
+export const getCopyPath = (pathname: string) => ({
+  label: t('contextMenu.sideBar.copyPath'),
+  id: 'copyPathMenuItem',
+  enabled: !!pathname && window.path.isAbsolute(pathname),
+  click() {
+    contextMenu.copyPath(pathname)
+  }
+})
+
 export const getDELETE = () => ({
   label: t('contextMenu.sideBar.moveToTrash'),
   id: 'deleteMenuItem',

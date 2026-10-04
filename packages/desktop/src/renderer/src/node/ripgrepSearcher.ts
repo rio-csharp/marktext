@@ -44,7 +44,8 @@ const startSearch = ({ mode, directories, pattern, options }: StartArgs): Cancel
   let offDone: (() => void) | null = null
   let offError: (() => void) | null = null
   let offCancelled: (() => void) | null = null
-  let cancelled = false
+  let settled = false
+  let resolveSearch: () => void = () => {}
 
   const cleanup = (): void => {
     if (offMatch) offMatch()
@@ -56,18 +57,23 @@ const startSearch = ({ mode, directories, pattern, options }: StartArgs): Cancel
   }
 
   const promise = new Promise<void>((resolve, reject) => {
+    resolveSearch = resolve
     offMatch = window.ripgrep.onMatch((payload: unknown) => {
       const env = payload as RipgrepPayloadEnvelope | null
-      if (!env || env.searchId !== searchId) return
-      try {
-        didMatch(env.payload)
-      } catch (err) {
-        console.error(err)
+      if (settled || !env || env.searchId !== searchId) return
+      const items = Array.isArray(env.payload) ? env.payload : [env.payload]
+      for (const item of items) {
+        if (settled) break
+        try {
+          didMatch(item)
+        } catch (err) {
+          console.error(err)
+        }
       }
     })
     offProgress = window.ripgrep.onProgress((payload: unknown) => {
       const env = payload as RipgrepPayloadEnvelope | null
-      if (!env || env.searchId !== searchId) return
+      if (settled || !env || env.searchId !== searchId) return
       try {
         didSearchPaths(env.num)
       } catch (err) {
@@ -76,19 +82,22 @@ const startSearch = ({ mode, directories, pattern, options }: StartArgs): Cancel
     })
     offDone = window.ripgrep.onDone((payload: unknown) => {
       const env = payload as RipgrepPayloadEnvelope | null
-      if (!env || env.searchId !== searchId) return
+      if (settled || !env || env.searchId !== searchId) return
+      settled = true
       cleanup()
       resolve()
     })
     offError = window.ripgrep.onError((payload: unknown) => {
       const env = payload as RipgrepPayloadEnvelope | null
-      if (!env || env.searchId !== searchId) return
+      if (settled || !env || env.searchId !== searchId) return
+      settled = true
       cleanup()
       reject(new Error(env.error || 'Ripgrep search failed'))
     })
     offCancelled = window.ripgrep.onCancelled((payload: unknown) => {
       const env = payload as RipgrepPayloadEnvelope | null
-      if (!env || env.searchId !== searchId) return
+      if (settled || !env || env.searchId !== searchId) return
+      settled = true
       cleanup()
       resolve()
     })
@@ -105,23 +114,33 @@ const startSearch = ({ mode, directories, pattern, options }: StartArgs): Cancel
       serializable = rest
     }
     const plainDirectories = Array.isArray(directories) ? directories.map((d) => String(d)) : []
-    window.ripgrep
-      .start({
-        searchId,
-        mode,
-        directories: plainDirectories,
-        pattern: typeof pattern === 'string' ? pattern : String(pattern || ''),
-        options: serializable
-      })
-      .catch((err) => {
-        cleanup()
-        reject(err)
-      })
+    const fail = (err: unknown): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    }
+    try {
+      window.ripgrep
+        .start({
+          searchId,
+          mode,
+          directories: plainDirectories,
+          pattern: typeof pattern === 'string' ? pattern : String(pattern || ''),
+          options: serializable
+        })
+        .catch(fail)
+    } catch (err) {
+      fail(err)
+    }
   }) as CancellableSearch
 
   promise.cancel = (): void => {
-    if (cancelled) return
-    cancelled = true
+    if (settled) return
+    settled = true
+    cleanup()
+    // Main may finish or disappear without sending a cancellation acknowledgement.
+    resolveSearch()
     window.ripgrep.cancel(searchId)
   }
   return promise

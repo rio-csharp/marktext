@@ -45,7 +45,7 @@
   "fileSortBy": {
     "description": "General--Sort files in opened folder by created time, modified time and title.",
     "enum": ["modified", "created", "title"],
-    "default": "modified"
+    "default": "title"
   },
   "fileSortOrder": {
     "description": "General--Sort order for files in opened folders: ascending or descending.",
@@ -390,6 +390,11 @@
   },
   "sourceCodeModeEnabled": {
     "description": "View--Whether the source-code mode is enabled by default.--internal",
+    "type": "boolean",
+    "default": false
+  },
+  "readOnly": {
+    "description": "View--Whether the current editor is read-only.--internal",
     "type": "boolean",
     "default": false
   },

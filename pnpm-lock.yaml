@@ -316,6 +316,42 @@ importers:
         specifier: ^3.3.5
         version: 3.3.5(typescript@6.0.3)
     optionalDependencies:
+      '@vscode/ripgrep-darwin-arm64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-darwin-x64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-arm':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-arm64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-ia32':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-ppc64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-riscv64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-s390x':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-linux-x64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-win32-arm64':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-win32-ia32':
+        specifier: 1.18.0
+        version: 1.18.0
+      '@vscode/ripgrep-win32-x64':
+        specifier: 1.18.0
+        version: 1.18.0
       native-keymap:
         specifier: ^3.3.9
         version: 3.3.9

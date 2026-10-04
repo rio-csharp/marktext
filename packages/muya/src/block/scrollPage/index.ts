@@ -118,19 +118,8 @@ export class ScrollPage extends Parent {
     }
 
     updateRefLinkAndImage(label: string) {
-        // Labels match case-insensitively with whitespace runs collapsed
-        // (CommonMark), and may contain regex metacharacters such as `c++`.
-        const pattern = label
-            .trim()
-            .split(/\s+/)
-            .map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-            .join('\\s+');
-        const REG = new RegExp(`\\[\\s*${pattern}\\s*\\](?!:)`, 'i');
-
-        this.breadthFirstTraverse((node) => {
-            if (node.isContent() && REG.test(node.text))
-                node.update();
-        });
+        for (const block of this.muya.editor.inlineRenderer.getBlocksReferencingLabel(label))
+            block.update();
     }
 
     handleBlurFromContent(block: Content) {

@@ -7,8 +7,7 @@
         type="text"
         class="search-input"
         :placeholder="t('sideBar.search.searchInFolder')"
-        @keyup="search"
-      >
+      />
       <div class="controls">
         <span
           :title="t('search.caseSensitive')"
@@ -37,65 +36,30 @@
       </div>
     </div>
 
-    <div
-      v-if="showNoFolderOpenedMessage"
-      class="search-message-section"
-    >
+    <div v-if="showNoFolderOpenedMessage" class="search-message-section">
       <span>{{ t('sideBar.search.noFolderOpen') }}</span>
     </div>
-    <div
-      v-if="showNoResultFoundMessage"
-      class="search-message-section"
-    >
+    <div v-if="showNoResultFoundMessage" class="search-message-section">
       {{ t('sideBar.search.noResultsFound') }}
     </div>
-    <div
-      v-if="searchErrorString"
-      class="search-message-section"
-    >
+    <div v-if="searchErrorString" class="search-message-section">
       {{ searchErrorString }}
     </div>
 
-    <div
-      v-show="showSearchCancelArea"
-      class="cancel-area"
-    >
-      <el-button
-        type="primary"
-        size="mini"
-        @click="cancelSearcher"
-      >
+    <div v-show="showSearchCancelArea" class="cancel-area">
+      <el-button type="primary" size="mini" @click="cancelSearcher">
         {{ t('sideBar.search.cancel') }} <VideoPause />
       </el-button>
     </div>
-    <div
-      v-if="searchResult.length"
-      class="search-result-info"
-    >
+    <div v-if="searchResult.length" class="search-result-info">
       {{ searchResultInfo }}
     </div>
-    <div
-      v-if="searchResult.length"
-      class="search-result"
-    >
-      <search-result-item
-        v-for="(item, index) of searchResult"
-        :key="index"
-        :search-result="item"
-      />
+    <div v-if="searchResult.length" class="search-result">
+      <search-result-item v-for="item of searchResult" :key="item.filePath" :search-result="item" />
     </div>
-    <div
-      v-else
-      class="empty"
-    >
+    <div v-else class="empty">
       <div class="no-data">
-        <el-button
-          v-if="showNoFolderOpenedMessage"
-          text
-          bg
-          type="primary"
-          @click="openFolder"
-        >
+        <el-button v-if="showNoFolderOpenedMessage" text bg type="primary" @click="openFolder">
           {{ t('sideBar.search.openFolder') }}
         </el-button>
       </div>
@@ -104,7 +68,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import debounce from 'lodash/debounce'
 import { useLayoutStore } from '@/store/layout'
 import { useProjectStore } from '@/store/project'
 import { useEditorStore } from '@/store/editor'
@@ -128,6 +93,8 @@ const editorStore = useEditorStore()
 const preferencesStore = usePreferencesStore()
 
 let searcherCancelCallback: (() => void) | null = null
+let searchGeneration = 0
+let disposed = false
 const ripgrepDirectorySearcher = new RipgrepDirectorySearcher()
 
 const keyword = ref('')
@@ -173,16 +140,16 @@ const showNoResultFoundMessage = computed(() => {
 })
 
 const search = (): void => {
+  debouncedSearch.cancel()
+  cancelSearcher()
+  if (disposed) return
+
   // No root directory is opened.
   if (showNoFolderOpenedMessage.value || !projectTree.value) {
     return
   }
 
   const { pathname: rootDirectoryPath } = projectTree.value
-
-  if (searcherRunning.value && searcherCancelCallback) {
-    searcherCancelCallback()
-  }
 
   searchErrorString.value = ''
   searcherCancelCallback = null
@@ -193,6 +160,8 @@ const search = (): void => {
     return
   }
 
+  const generation = searchGeneration
+  const isCurrentSearch = (): boolean => !disposed && generation === searchGeneration
   let canceled = false
   searcherRunning.value = true
   startShowSearchCancelAreaTimer()
@@ -202,12 +171,17 @@ const search = (): void => {
   // `.then().catch()` (which is a plain `Promise<void>` and loses `cancel`).
   const cancellable = ripgrepDirectorySearcher.search([rootDirectoryPath], keyword.value, {
     didMatch: (res: unknown) => {
-      if (canceled) return
+      if (canceled || !isCurrentSearch()) return
       newSearchResult.push(res as SearchResult)
     },
     didSearchPaths: (numPathsFound: unknown) => {
       // More than 100 files with (multiple) matches were found.
-      if (!canceled && typeof numPathsFound === 'number' && numPathsFound > 100) {
+      if (
+        !canceled &&
+        isCurrentSearch() &&
+        typeof numPathsFound === 'number' &&
+        numPathsFound > 100
+      ) {
         canceled = true
         cancellable.cancel()
         searchErrorString.value = t('search.searchLimited', { count: 100 })
@@ -232,12 +206,14 @@ const search = (): void => {
 
   cancellable
     .then(() => {
+      if (!isCurrentSearch()) return
       searchResult.value = newSearchResult
       searcherRunning.value = false
       searcherCancelCallback = null
       stopShowSearchCancelAreaTimer()
     })
     .catch((err) => {
+      if (!isCurrentSearch()) return
       canceled = true
       cancellable.cancel()
       log.error('Error while searching in directory:', err)
@@ -250,9 +226,12 @@ const search = (): void => {
   searcherCancelCallback = cancellable.cancel.bind(cancellable)
 }
 
+// Input changes include paste and IME edits; option toggles still search immediately.
+const debouncedSearch = debounce(search, 300)
+
 const handleFindInFolder = (executeSearch: boolean | unknown = true): void => {
   nextTick(() => {
-    if (searchEl.value) {
+    if (!disposed && searchEl.value) {
       searchEl.value.focus()
       // `searchMatches.value` may carry a `selectedText` populated elsewhere
       // (legacy contract from CodeMirror / find-in-page). Narrow defensively.
@@ -307,10 +286,32 @@ const stopShowSearchCancelAreaTimer = (): void => {
 }
 
 const cancelSearcher = (): void => {
-  if (searcherRunning.value && searcherCancelCallback) {
-    searcherCancelCallback()
-  }
+  debouncedSearch.cancel()
+  // Completion from an older request must not replace newer results or timers.
+  searchGeneration++
+  searcherCancelCallback?.()
+  searcherCancelCallback = null
+  searcherRunning.value = false
+  stopShowSearchCancelAreaTimer()
 }
+
+watch(
+  keyword,
+  () => {
+    cancelSearcher()
+    if (!keyword.value) searchResult.value = []
+    debouncedSearch()
+  },
+  { flush: 'sync' }
+)
+
+watch(
+  () => projectTree.value?.pathname,
+  () => {
+    searchResult.value = []
+    search()
+  }
+)
 
 watch(showSideBar, (value, oldValue) => {
   if (rightColumn.value === 'search') {
@@ -329,6 +330,12 @@ onMounted(() => {
     searcherRunning.value = true
     search()
   }
+})
+
+onBeforeUnmount(() => {
+  disposed = true
+  cancelSearcher()
+  bus.off('findInFolder', handleFindInFolder)
 })
 </script>
 

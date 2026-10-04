@@ -6,11 +6,7 @@ let level: TLevel = 'log';
 type Ilogger = Record<TLevel, (...args: string[]) => void>;
 
 function debug(method: TLevel, ...args: unknown[]) {
-    if (
-        levels.indexOf(method) <= levels.indexOf(level)
-        // eslint-disable-next-line node/prefer-global/process
-        && process.env.NODE_ENV !== 'production'
-    ) {
+    if (namespace.enabled(method)) {
         // eslint-disable-next-line no-console
         console[method](...args);
     }
@@ -27,6 +23,11 @@ function namespace(ns: string): Ilogger {
 namespace.level = (newLevel: TLevel) => {
     level = newLevel;
 };
+// Guard expensive arguments before they are evaluated by the caller.
+namespace.enabled = (method: TLevel) =>
+    levels.indexOf(method) <= levels.indexOf(level)
+    // eslint-disable-next-line node/prefer-global/process
+    && process.env.NODE_ENV !== 'production';
 debug.level = namespace.level;
 
 export default namespace;

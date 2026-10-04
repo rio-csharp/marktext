@@ -399,6 +399,7 @@ class Content extends TreeNode {
 
         // dispatch change to modify json state
         if (oldText !== text) {
+            this.inlineRenderer.invalidateLabels();
             const diffs = diff(oldText, text);
 
             this.jsonState.editOperation(path, diffToTextOp(diffs));

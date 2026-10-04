@@ -74,6 +74,9 @@ electronLanguages: # Keep Chromium/AppKit locales for the UI languages MarkText 
 
 asarUnpack:
   - resources/**
+  # The platform ripgrep packages are resolved from app.asar, while their
+  # executables must be available on the real filesystem for spawn().
+  - node_modules/@vscode/ripgrep-*/bin/*
 fileAssociations:
   - ext: md
     name: Markdown

@@ -240,6 +240,17 @@ class ParagraphContent extends Format {
         this.createDomNode();
     }
 
+    override get text() {
+        return super.text;
+    }
+
+    override set text(text: string) {
+        const oldText = this.text;
+        super.text = text;
+        if (oldText !== text)
+            this.inlineRenderer.notifyDefinitionTransition(oldText, text);
+    }
+
     override getAnchor() {
         return this.parent;
     }

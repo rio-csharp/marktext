@@ -1,3 +1,5 @@
+import { normalizeReferenceLabel } from './referenceLabel';
+
 import type { Labels, Rules } from './types';
 import { isLengthEven } from '../utils';
 import { parseSrcAndTitle } from './linkDestination';
@@ -319,7 +321,7 @@ export function matchReference(
     const to = matchAt(pattern, src, index);
     if (
         !to
-        || !labels.has((to[3] || to[1]).toLowerCase())
+        || !labels.has(normalizeReferenceLabel(to[3] || to[1]))
         || !isLengthEven(to[2])
         || !isLengthEven(to[4])
     ) {

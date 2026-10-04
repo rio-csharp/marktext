@@ -121,6 +121,7 @@
       "sourceCodeMode": "Modo Código Fonte",
       "typewriterMode": "Modo Máquina de Escrever",
       "focusMode": "Modo Foco",
+      "readOnlyMode": "Somente leitura",
       "toggleTableOfContents": "Alternar Índice",
       "reloadImages": "Recarregar Imagens",
       "showDeveloperTools": "Mostrar Ferramentas de Desenvolvedor",
@@ -204,6 +205,7 @@
       "paste": "Colar",
       "rename": "Renomear",
       "moveToTrash": "Mover para Lixeira",
+      "copyPath": "Copiar caminho",
       "showInFolder": "Mostrar na Pasta"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "Modo Código Fonte",
       "typewriterMode": "Modo Máquina de Escrever",
       "focusMode": "Modo Foco",
+      "readOnlyMode": "Somente leitura",
       "toggleSourceCodeMode": "Alternar Modo Código Fonte",
       "toggleTypewriterMode": "Alternar Modo Máquina de Escrever",
       "toggleFocusMode": "Alternar Modo Foco",

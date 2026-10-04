@@ -47,6 +47,10 @@ export const toggleFocusMode = (win: Win): void => {
   toggleTypeMode(win, 'focus')
 }
 
+export const toggleReadOnlyMode = (win: Win): void => {
+  toggleTypeMode(win, 'readOnly')
+}
+
 export const toggleSourceCodeMode = (win: Win): void => {
   toggleTypeMode(win, 'sourceCode')
 }
@@ -64,7 +68,9 @@ export const showTabBar = (win: Win): void => {
 }
 
 export const showTableOfContents = (win: Win): void => {
-  setLayout(win, 'rightColumn', 'toc')
+  if (win && win.webContents) {
+    win.webContents.send('mt::toggle-outline-panel')
+  }
 }
 
 export const toggleTypewriterMode = (win: Win): void => {
@@ -83,6 +89,7 @@ export const loadViewCommands = (commandManager: CommandManager): void => {
   commandManager.add(COMMANDS.VIEW_COMMAND_PALETTE, showCommandPalette)
   commandManager.add(COMMANDS.VIEW_FOCUS_MODE, toggleFocusMode)
   commandManager.add(COMMANDS.VIEW_FORCE_RELOAD_IMAGES, reloadImageCache)
+  commandManager.add(COMMANDS.VIEW_READ_ONLY_MODE, toggleReadOnlyMode)
   commandManager.add(COMMANDS.VIEW_SOURCE_CODE_MODE, toggleSourceCodeMode)
   commandManager.add(COMMANDS.VIEW_TOGGLE_SIDEBAR, toggleSidebar)
   commandManager.add(COMMANDS.VIEW_TOGGLE_TABBAR, toggleTabBar)
@@ -123,6 +130,12 @@ export const viewLayoutChanged = (
         break
       case 'showTabBar':
         changeMenuByName('tabBarMenuItem', value)
+        break
+      case 'showOutlinePanel':
+        changeMenuByName('tocMenuItem', value)
+        break
+      case 'readOnly':
+        changeMenuByName('readOnlyModeMenuItem', value)
         break
       case 'sourceCode':
         changeMenuByName('sourceCodeModeMenuItem', !!value)

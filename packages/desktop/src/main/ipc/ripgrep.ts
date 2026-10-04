@@ -11,7 +11,7 @@ const resolveRgPath = (): string => {
 
 interface ActiveSearch {
   sender: WebContents
-  cancel: () => void
+  cancel: (notify?: boolean) => void
 }
 
 const activeSearches = new Map<string, ActiveSearch>()
@@ -28,17 +28,131 @@ const sendIfAlive = (
   }
 }
 
-const cleanupAtSenderDestroy = (sender: WebContents | null | undefined): void => {
-  if (!sender) return
-  const handler = (): void => {
-    for (const [id, entry] of activeSearches.entries()) {
-      if (entry.sender === sender) {
-        entry.cancel()
-        activeSearches.delete(id)
+const MATCH_BATCH_SIZE = 100
+const MATCH_BATCH_WINDOW_MS = 16
+
+interface MatchBatcher {
+  queue: (payload: unknown) => void
+  flush: () => void
+  dispose: () => void
+}
+
+const createMatchBatcher = (
+  sender: WebContents,
+  searchId: string,
+  getNum: () => number,
+  isActive: () => boolean
+): MatchBatcher => {
+  const queue: unknown[] = []
+  let flushTimer: NodeJS.Timeout | null = null
+  let disposed = false
+
+  const flush = (): void => {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    if (disposed || queue.length === 0) return
+    if (!isActive()) {
+      queue.length = 0
+      return
+    }
+    const batch = queue.splice(0, queue.length)
+    sendIfAlive(sender, 'mt::rg::progress', { searchId, num: getNum() })
+    sendIfAlive(sender, 'mt::rg::match', { searchId, payload: batch })
+  }
+
+  return {
+    queue: (payload: unknown): void => {
+      if (disposed || !isActive()) return
+      queue.push(payload)
+      if (queue.length >= MATCH_BATCH_SIZE) flush()
+      else if (!flushTimer) flushTimer = setTimeout(flush, MATCH_BATCH_WINDOW_MS)
+    },
+    flush,
+    dispose: (): void => {
+      disposed = true
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      queue.length = 0
+    }
+  }
+}
+
+const createSearch = (sender: WebContents, searchId: string, directoryCount: number) => {
+  const children: ChildProcess[] = []
+  let finished = false
+  let pendingPaths = 0
+  let pendingDirs = directoryCount
+
+  const isActive = (): boolean => !finished && activeSearches.get(searchId) === entry
+  const batcher = createMatchBatcher(sender, searchId, () => pendingPaths, isActive)
+
+  const release = (): void => {
+    finished = true
+    batcher.dispose()
+    sender.removeListener('destroyed', onDestroyed)
+    // Late callbacks from a replaced search must not remove its successor.
+    if (activeSearches.get(searchId) === entry) activeSearches.delete(searchId)
+  }
+
+  const killChildren = (): void => {
+    for (const child of children) {
+      try {
+        child.kill()
+      } catch {
+        /* already dead */
       }
     }
   }
-  sender.once('destroyed', handler)
+
+  const cancel = (notify = true): void => {
+    if (finished) return
+    // Killing can trigger close callbacks, so invalidate the search first.
+    release()
+    killChildren()
+    if (notify) sendIfAlive(sender, 'mt::rg::cancelled', { searchId })
+  }
+  const onDestroyed = (): void => cancel(false)
+  const entry: ActiveSearch = { sender, cancel }
+  activeSearches.set(searchId, entry)
+  sender.once('destroyed', onDestroyed)
+  if (sender.isDestroyed()) cancel(false)
+
+  const finishIfDone = (err?: unknown): void => {
+    if (!isActive() || (pendingDirs > 0 && !err)) return
+    // The renderer must receive the last batch before the terminal event.
+    batcher.flush()
+    if (!isActive()) return
+    release()
+    if (err) {
+      killChildren()
+      sendIfAlive(sender, 'mt::rg::error', {
+        searchId,
+        error: err instanceof Error ? err.message : String(err)
+      })
+    } else {
+      sendIfAlive(sender, 'mt::rg::done', { searchId })
+    }
+  }
+
+  return {
+    children,
+    isActive,
+    finishIfDone,
+    queue: (payload: unknown): void => {
+      if (!isActive()) return
+      pendingPaths++
+      batcher.queue(payload)
+    },
+    close: (): void => {
+      if (!isActive()) return
+      pendingDirs--
+      finishIfDone()
+    }
+  }
 }
 
 interface TextInput {
@@ -180,46 +294,11 @@ const startTextSearch = (
   options: SearchOptions
 ): void => {
   const rgPath = resolveRgPath()
-  const children: ChildProcess[] = []
-  let cancelled = false
-  let pendingPaths = 0
-  let pendingDirs = directories.length
-  let finished = false
-
-  const finishIfDone = (err?: unknown): void => {
-    if (finished) return
-    if (pendingDirs === 0 || err) {
-      finished = true
-      activeSearches.delete(searchId)
-      if (err) {
-        sendIfAlive(sender, 'mt::rg::error', {
-          searchId,
-          error: err instanceof Error ? err.message : String(err)
-        })
-      } else {
-        sendIfAlive(sender, 'mt::rg::done', { searchId })
-      }
-    }
-  }
-
-  const cancel = (): void => {
-    cancelled = true
-    for (const child of children) {
-      try {
-        child.kill()
-      } catch {
-        /* already dead */
-      }
-    }
-    if (!finished) {
-      finished = true
-      activeSearches.delete(searchId)
-      sendIfAlive(sender, 'mt::rg::cancelled', { searchId })
-    }
-  }
-  activeSearches.set(searchId, { sender, cancel })
+  const search = createSearch(sender, searchId, directories.length)
+  search.finishIfDone()
 
   for (const directoryPath of directories) {
+    if (!search.isActive()) break
     let regexpStr: string | null = null
     let textPattern: string | null = null
     const args = ['--json']
@@ -238,10 +317,18 @@ const startTextSearch = (
     if (options.maxFileSize) args.push('--max-filesize', options.maxFileSize + '')
     if (options.includeHidden) args.push('--hidden')
     if (options.noIgnore) args.push('--no-ignore')
-    if (options.leadingContextLineCount) { args.push('--before-context', String(options.leadingContextLineCount)) }
-    if (options.trailingContextLineCount) { args.push('--after-context', String(options.trailingContextLineCount)) }
-    for (const inclusion of prepareGlobs(options.inclusions, directoryPath)) { args.push('--iglob', inclusion) }
-    for (const exclusion of prepareGlobs(options.exclusions, directoryPath)) { args.push('--iglob', '!' + exclusion) }
+    if (options.leadingContextLineCount) {
+      args.push('--before-context', String(options.leadingContextLineCount))
+    }
+    if (options.trailingContextLineCount) {
+      args.push('--after-context', String(options.trailingContextLineCount))
+    }
+    for (const inclusion of prepareGlobs(options.inclusions, directoryPath)) {
+      args.push('--iglob', inclusion)
+    }
+    for (const exclusion of prepareGlobs(options.exclusions, directoryPath)) {
+      args.push('--iglob', '!' + exclusion)
+    }
     args.push('--')
     if (textPattern) args.push(textPattern)
     args.push(directoryPath)
@@ -250,10 +337,10 @@ const startTextSearch = (
     try {
       child = spawn(rgPath, args, { cwd: directoryPath, stdio: ['pipe', 'pipe', 'pipe'] })
     } catch (err) {
-      finishIfDone(err)
+      search.finishIfDone(err)
       return
     }
-    children.push(child)
+    search.children.push(child)
 
     let buffer = ''
     let bufferError = ''
@@ -262,34 +349,31 @@ const startTextSearch = (
     let pendingTrailingContexts: Set<unknown[]> = new Set()
 
     child.on('close', (code) => {
+      if (!search.isActive()) return
       if (code !== null && code > 1 && bufferError) {
         log.warn('Ripgrep finished with errors (exit code ' + code + '):', bufferError)
       }
-      if (buffer && !cancelled) {
+      if (buffer) {
         try {
           const message = JSON.parse(buffer)
-          if (message.type === 'end' && pendingEvent) {
-            pendingPaths++
-            sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-            sendIfAlive(sender, 'mt::rg::match', { searchId, payload: pendingEvent })
-          }
+          if (message.type === 'end' && pendingEvent) search.queue(pendingEvent)
         } catch {
           /* parse error */
         }
       }
-      pendingDirs--
-      finishIfDone()
+      search.close()
     })
-    child.on('error', (err) => finishIfDone(err))
+    child.on('error', (err) => search.finishIfDone(err))
     child.stderr?.on('data', (chunk: Buffer | string) => {
-      bufferError += chunk
+      if (search.isActive()) bufferError += chunk
     })
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      if (cancelled) return
+      if (!search.isActive()) return
       buffer += chunk
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
+        if (!search.isActive()) break
         if (!line) continue
         try {
           const message = JSON.parse(line)
@@ -316,9 +400,7 @@ const startTextSearch = (
               })
             }
           } else if (message.type === 'end') {
-            pendingPaths++
-            sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-            sendIfAlive(sender, 'mt::rg::match', { searchId, payload: pendingEvent })
+            search.queue(pendingEvent)
             pendingEvent = null
           }
         } catch (err) {
@@ -336,51 +418,18 @@ const startFileSearch = (
   options: SearchOptions
 ): void => {
   const rgPath = resolveRgPath()
-  const children: ChildProcess[] = []
-  let cancelled = false
-  let pendingPaths = 0
-  let pendingDirs = directories.length
-  let finished = false
-
-  const finishIfDone = (err?: unknown): void => {
-    if (finished) return
-    if (pendingDirs === 0 || err) {
-      finished = true
-      activeSearches.delete(searchId)
-      if (err) {
-        sendIfAlive(sender, 'mt::rg::error', {
-          searchId,
-          error: err instanceof Error ? err.message : String(err)
-        })
-      } else {
-        sendIfAlive(sender, 'mt::rg::done', { searchId })
-      }
-    }
-  }
-
-  const cancel = (): void => {
-    cancelled = true
-    for (const child of children) {
-      try {
-        child.kill()
-      } catch {
-        /* already dead */
-      }
-    }
-    if (!finished) {
-      finished = true
-      activeSearches.delete(searchId)
-      sendIfAlive(sender, 'mt::rg::cancelled', { searchId })
-    }
-  }
-  activeSearches.set(searchId, { sender, cancel })
+  const search = createSearch(sender, searchId, directories.length)
+  search.finishIfDone()
 
   for (const directoryPath of directories) {
+    if (!search.isActive()) break
     const args = ['--files']
     if (options.followSymlinks) args.push('--follow')
     if (options.includeHidden) args.push('--hidden')
     if (options.noIgnore) args.push('--no-ignore')
-    for (const inclusion of prepareGlobs(options.inclusions, directoryPath)) { args.push('--iglob', inclusion) }
+    for (const inclusion of prepareGlobs(options.inclusions, directoryPath)) {
+      args.push('--iglob', inclusion)
+    }
     args.push('--')
     args.push(directoryPath)
 
@@ -388,34 +437,33 @@ const startFileSearch = (
     try {
       child = spawn(rgPath, args, { cwd: directoryPath, stdio: ['pipe', 'pipe', 'pipe'] })
     } catch (err) {
-      finishIfDone(err)
+      search.finishIfDone(err)
       return
     }
-    children.push(child)
+    search.children.push(child)
 
     let buffer = ''
     let bufferError = ''
     child.on('close', (code) => {
+      if (!search.isActive()) return
       if (code !== null && code > 1) {
-        finishIfDone(new Error(bufferError))
+        search.finishIfDone(new Error(bufferError))
         return
       }
-      pendingDirs--
-      finishIfDone()
+      search.close()
     })
-    child.on('error', (err) => finishIfDone(err))
+    child.on('error', (err) => search.finishIfDone(err))
     child.stderr?.on('data', (chunk: Buffer | string) => {
-      bufferError += chunk
+      if (search.isActive()) bufferError += chunk
     })
     child.stdout?.on('data', (chunk: Buffer | string) => {
-      if (cancelled) return
+      if (!search.isActive()) return
       buffer += chunk
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
       for (const line of lines) {
-        pendingPaths++
-        sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-        sendIfAlive(sender, 'mt::rg::match', { searchId, payload: line })
+        if (!search.isActive()) break
+        search.queue(line)
       }
     })
   }
@@ -432,13 +480,13 @@ interface RipgrepRequest {
 export const registerRipgrepHandlers = (): void => {
   ipcMain.handle('mt::rg::start', (event, req: RipgrepRequest) => {
     const { searchId, mode, directories, pattern, options } = req
-    cleanupAtSenderDestroy(event.sender)
+    activeSearches.get(searchId)?.cancel()
     if (mode === 'files') startFileSearch(event.sender, searchId, directories, options || {})
     else startTextSearch(event.sender, searchId, directories, pattern, options || {})
     return true
   })
-  ipcMain.on('mt::rg::cancel', (_event, searchId: string) => {
+  ipcMain.on('mt::rg::cancel', (event, searchId: string) => {
     const entry = activeSearches.get(searchId)
-    if (entry) entry.cancel()
+    if (entry?.sender === event.sender) entry.cancel()
   })
 }

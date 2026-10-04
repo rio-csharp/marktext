@@ -79,7 +79,7 @@ interface EditorBufferStoreLike {
   handleClose(
     restoreBufferId: string | undefined,
     windows: { id: number; win: BaseWindow }[]
-  ): void
+  ): Promise<void>
 }
 
 class WindowManager extends TypedEmitter<WindowManagerEvents> {
@@ -89,6 +89,7 @@ class WindowManager extends TypedEmitter<WindowManagerEvents> {
   private _windowActivity: WindowActivityList
   public editorBufferStore: EditorBufferStoreLike
   private _watcher: Watcher
+  private readonly _closingWindows = new Set<number>()
 
   /**
    * @param appMenu The application menu instance.
@@ -377,15 +378,30 @@ class WindowManager extends TypedEmitter<WindowManagerEvents> {
       editor.addToOpenedFiles(filePath)
     })
 
-    // Force close a BrowserWindow
-    ipcMain.on('mt::close-window', (e) => {
+    ipcMain.on('mt::close-window', async (e) => {
       const win = BrowserWindow.fromWebContents(e.sender)
-      // Before closing, update the buffer store if needed
-      this.editorBufferStore.handleClose(
-        (win as unknown as { restoreBufferId?: string })?.restoreBufferId,
-        this.getWindowsByType('editor')
-      )
-      this.forceClose(win)
+      if (!win || this._closingWindows.has(win.id)) return
+      const windowId = win.id
+      this._closingWindows.add(windowId)
+      try {
+        // The recovery snapshot may be the only copy of an unsaved document.
+        await this.editorBufferStore.handleClose(
+          (win as unknown as { restoreBufferId?: string }).restoreBufferId,
+          this.getWindowsByType('editor')
+        )
+        if (!win.isDestroyed()) this.forceClose(win)
+      } catch (error) {
+        log.error('Failed to persist editor buffer before closing:', error)
+        if (!win.isDestroyed()) {
+          win.webContents.send('mt::show-notification', {
+            title: 'Could not preserve unsaved documents; window remains open',
+            type: 'error',
+            message: error instanceof Error ? error.message : String(error)
+          })
+        }
+      } finally {
+        this._closingWindows.delete(windowId)
+      }
     })
 
     ipcMain.on('mt::open-file', (e, filePath: string, options: Record<string, unknown>) => {

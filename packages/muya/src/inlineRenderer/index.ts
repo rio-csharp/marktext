@@ -1,22 +1,41 @@
+import type Content from '../block/base/content';
 import type Format from '../block/base/format';
 import type ParagraphContent from '../block/content/paragraphContent';
 import type { Muya } from '../muya';
 import type { IRenderCursor } from '../selection/types';
-import type { IParagraphState, TContainerState, TState } from '../state/types';
+import type { IParagraphState } from '../state/types';
 import type { IHighlight, Labels } from './types';
 import logger from '../utils/logger';
 import { tokenizer } from './lexer';
 import Renderer from './renderer';
 import { beginRules } from './rules';
+import { normalizeReferenceLabel } from './referenceLabel';
 
 const debug = logger('inlineRenderer:');
+const REFERENCE_USAGE = /!?\[([^\]]+)\](?:\[([^\]]*)\])?/g;
 
 class InlineRenderer {
     public labels: Labels = new Map();
     public renderer: Renderer;
 
+    private _labelsDirty = true;
+    private _labelRefs = new Map<string, Set<Content>>();
+
     constructor(public muya: Muya) {
         this.renderer = new Renderer(muya, this);
+    }
+
+    invalidateLabels() {
+        this._labelsDirty = true;
+    }
+
+    notifyDefinitionTransition(oldText: string, newText: string) {
+        if (
+            beginRules.reference_definition.test(oldText)
+            || beginRules.reference_definition.test(newText)
+        ) {
+            this.invalidateLabels();
+        }
     }
 
     private _tokenizer(block: Format, highlights: IHighlight[]) {
@@ -60,7 +79,8 @@ class InlineRenderer {
     }
 
     patch(block: Format, cursor?: IRenderCursor, highlights: IHighlight[] = []) {
-        this._collectReferenceDefinitions();
+        if (this._labelsDirty)
+            this._rebuildLabels();
         const { domNode } = block;
         if (block.isParent())
             debug.error('Patch can only handle content block');
@@ -74,28 +94,69 @@ class InlineRenderer {
         domNode!.innerHTML = html;
     }
 
-    private _collectReferenceDefinitions() {
-        const state = this.muya.editor.jsonState.getState();
-        const labels = new Map();
+    getBlocksReferencingLabel(label: string): Content[] {
+        if (this._labelsDirty)
+            this._rebuildLabels();
+        return [...(this._labelRefs.get(normalizeReferenceLabel(label)) ?? [])];
+    }
 
-        const travel = (sts: TState[]) => {
-            if (Array.isArray(sts) && sts.length) {
-                for (const st of sts) {
-                    if (st.name === 'paragraph') {
-                        const { label, info } = this.getLabelInfo(st);
-                        if (label && info)
-                            labels.set(label, info);
-                    }
-                    else if ((st as TContainerState).children) {
-                        travel((st as TContainerState).children);
-                    }
-                }
-            }
-        };
+    private _rebuildLabels() {
+        const labels: Labels = new Map();
+        const { scrollPage } = this.muya.editor;
 
-        travel(state);
+        if (scrollPage) {
+            scrollPage.depthFirstTraverse((node) => {
+                if (!node.isContent())
+                    return;
+                const content = node as Content;
+                const { label, info } = content.blockName === 'paragraph.content'
+                    ? this.getLabelInfo(content as ParagraphContent)
+                    : { label: null, info: null };
+                if (label && info && !labels.has(label))
+                    labels.set(label, info);
+            });
+        }
+        else {
+            this.muya.editor.jsonState.traverseStates((state) => {
+                if (state.name !== 'paragraph')
+                    return;
+                const { label, info } = this.getLabelInfo(state);
+                if (label && info && !labels.has(label))
+                    labels.set(label, info);
+            });
+        }
 
         this.labels = labels;
+        this._labelRefs = this._collectLabelRefs();
+        this._labelsDirty = false;
+    }
+
+    private _collectLabelRefs() {
+        const refs = new Map<string, Set<Content>>();
+        const { scrollPage } = this.muya.editor;
+        if (!scrollPage)
+            return refs;
+
+        scrollPage.depthFirstTraverse((node) => {
+            if (!node.isContent())
+                return;
+            const block = node as Content;
+            REFERENCE_USAGE.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = REFERENCE_USAGE.exec(block.text)) !== null) {
+                const after = block.text[REFERENCE_USAGE.lastIndex];
+                if (after === ':' || after === '(')
+                    continue;
+                const key = normalizeReferenceLabel(match[2] || match[1]);
+                if (!key)
+                    continue;
+                let blocks = refs.get(key);
+                if (!blocks)
+                    refs.set(key, blocks = new Set());
+                blocks.add(block);
+            }
+        });
+        return refs;
     }
 
     getLabelInfo(blockOrState: ParagraphContent | IParagraphState) {
@@ -104,7 +165,7 @@ class InlineRenderer {
         let label = null;
         let info = null;
         if (tokens) {
-            label = (tokens[2] + tokens[3]).toLowerCase();
+            label = normalizeReferenceLabel(tokens[2] + tokens[3]);
             info = {
                 href: tokens[6],
                 title: tokens[10] || '',

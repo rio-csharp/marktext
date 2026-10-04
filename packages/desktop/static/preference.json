@@ -7,7 +7,7 @@
   "zoom": 1.0,
   "hideScrollbar": false,
   "wordWrapInToc": false,
-  "fileSortBy": "created",
+  "fileSortBy": "title",
   "fileSortOrder": "asc",
   "startUpAction": "restoreAll",
   "restoreLayoutState": true,
@@ -75,6 +75,7 @@
   "sideBarVisibility": false,
   "tabBarVisibility": false,
   "sourceCodeModeEnabled": false,
+  "readOnly": false,
   "openedFilesInSidebar": true,
 
   "searchExclusions": [],

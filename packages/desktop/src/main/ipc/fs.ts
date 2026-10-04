@@ -1,11 +1,6 @@
 import fs from 'fs-extra'
-import { type Stats } from 'fs'
+import { constants, type Stats } from 'fs'
 import { ipcMain } from 'electron'
-import {
-  isFile as commonIsFile,
-  isDirectory as commonIsDirectory,
-  isExecutableFile
-} from 'common/filesystem'
 import { copyFileWithContentHash } from '../filesystem'
 
 interface SerializedStat {
@@ -43,8 +38,21 @@ const toBuffer = (data: unknown): unknown => {
 }
 
 export const registerFsHandlers = (): void => {
-  ipcMain.handle('mt::fs::is-file', (_e, p: string) => commonIsFile(p))
-  ipcMain.handle('mt::fs::is-directory', (_e, p: string) => commonIsDirectory(p))
+  // Like the common predicates, these inspect the link itself, not its target.
+  ipcMain.handle('mt::fs::is-file', async (_e, p: string) => {
+    try {
+      return (await fs.lstat(p)).isFile()
+    } catch {
+      return false
+    }
+  })
+  ipcMain.handle('mt::fs::is-directory', async (_e, p: string) => {
+    try {
+      return (await fs.lstat(p)).isDirectory()
+    } catch {
+      return false
+    }
+  })
   ipcMain.handle('mt::fs::empty-dir', (_e, p: string) => fs.emptyDir(p))
   ipcMain.handle('mt::fs::copy', (_e, src: string, dest: string) => fs.copy(src, dest))
   ipcMain.handle('mt::fs::copy-with-content-hash', (_e, src: string, outputDir: string) =>
@@ -58,19 +66,26 @@ export const registerFsHandlers = (): void => {
   ipcMain.handle('mt::fs::move', (_e, src: string, dest: string) =>
     fs.move(src, dest, { overwrite: false })
   )
-  ipcMain.handle('mt::fs::stat', async(_e, p: string) => serializeStat(await fs.stat(p)))
+  ipcMain.handle('mt::fs::stat', async (_e, p: string) => serializeStat(await fs.stat(p)))
 
   ipcMain.handle('mt::fs::write-file', (_e, p: string, data: unknown) =>
     fs.writeFile(p, toBuffer(data) as string | NodeJS.ArrayBufferView)
   )
-  ipcMain.handle('mt::fs::read-file', async(_e, p: string, encoding?: BufferEncoding) => {
+  ipcMain.handle('mt::fs::read-file', async (_e, p: string, encoding?: BufferEncoding) => {
     const buf = await fs.readFile(p, encoding)
     return buf
   })
   ipcMain.handle('mt::fs::path-exists', (_e, p: string) => fs.pathExists(p))
   ipcMain.handle('mt::fs::unlink', (_e, p: string) => fs.unlink(p))
   ipcMain.handle('mt::fs::readdir', (_e, p: string) => fs.readdir(p))
-  // The same predicate the main process spawns by, or the preferences panel
-  // green-ticks a cliScript that then fails with EACCES.
-  ipcMain.handle('mt::fs::is-executable', (_e, p: string) => isExecutableFile(p))
+  // Match the spawn predicate: mode bits alone do not establish this user's access.
+  ipcMain.handle('mt::fs::is-executable', async (_e, p: string) => {
+    try {
+      if (!(await fs.stat(p)).isFile()) return false
+      await fs.access(p, constants.X_OK)
+      return true
+    } catch {
+      return false
+    }
+  })
 }

@@ -121,6 +121,7 @@
       "sourceCodeMode": "Quellcode-Modus",
       "typewriterMode": "Schreibmaschinen-Modus",
       "focusMode": "Fokus-Modus",
+      "readOnlyMode": "Schreibgeschützt",
       "toggleTableOfContents": "Inhaltsverzeichnis umschalten",
       "reloadImages": "Bilder neu laden",
       "showDeveloperTools": "Entwicklertools anzeigen",
@@ -204,6 +205,7 @@
       "paste": "Einfügen",
       "rename": "Umbenennen",
       "moveToTrash": "In Papierkorb verschieben",
+      "copyPath": "Pfad kopieren",
       "showInFolder": "Im Ordner anzeigen"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "Quellcode-Modus",
       "typewriterMode": "Schreibmaschinen-Modus",
       "focusMode": "Fokus-Modus",
+      "readOnlyMode": "Schreibgeschützt",
       "toggleSourceCodeMode": "Quellcode-Modus umschalten",
       "toggleTypewriterMode": "Schreibmaschinen-Modus umschalten",
       "toggleFocusMode": "Fokus-Modus umschalten",

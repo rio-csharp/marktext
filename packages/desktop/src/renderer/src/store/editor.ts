@@ -118,7 +118,12 @@ interface AffiliationEntry {
 }
 
 interface SelectionChange {
-  start: { key: string; offset: number; block?: { text?: string; functionType?: string }; type?: string }
+  start: {
+    key: string
+    offset: number
+    block?: { text?: string; functionType?: string }
+    type?: string
+  }
   end: { key: string; offset: number; block?: { functionType?: string }; type?: string }
   affiliation?: AffiliationEntry[]
   hasFrontMatter?: boolean
@@ -149,6 +154,8 @@ export interface EditorState {
 }
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+let lastSelectionMenuStateJson = ''
+let lastFormatMenuStateJson = ''
 
 export const useEditorStore = defineStore('editor', {
   state: (): EditorState => ({
@@ -240,8 +247,8 @@ export const useEditorStore = defineStore('editor', {
         const tab = restoredTabId
           ? this.tabs.find((t) => t.id === restoredTabId)
           : this.tabs.find((t) =>
-            window.fileUtils.isSamePathSync(t.pathname, warning.pathname ?? '')
-          )
+              window.fileUtils.isSamePathSync(t.pathname, warning.pathname ?? '')
+            )
 
         if (!tab) continue
 
@@ -544,6 +551,14 @@ export const useEditorStore = defineStore('editor', {
     // no-op when nothing is pending.
     flushActiveEditor(): void {
       bus.emit('flush-active-editor')
+    },
+
+    MARK_DIRTY(id: string): void {
+      const index = this.tabIdToIndex[id]
+      const tab = index === undefined ? undefined : this.tabs[index]
+      if (!tab || !tab.isSaved) return
+      tab.isSaved = false
+      debouncedSendBufferedState()
     },
 
     FILE_SAVE(): void {
@@ -912,14 +927,8 @@ export const useEditorStore = defineStore('editor', {
             project: projectStore
           })
         )
-        bus.emit(
-          'cmd::register-command',
-          new LineEndingCommand(this)
-        )
-        bus.emit(
-          'cmd::register-command',
-          new TrailingNewlineCommand(this)
-        )
+        bus.emit('cmd::register-command', new LineEndingCommand(this))
+        bus.emit('cmd::register-command', new TrailingNewlineCommand(this))
 
         setTimeout(() => {
           window.electron.ipcRenderer.send('mt::request-keybindings')
@@ -1150,8 +1159,7 @@ export const useEditorStore = defineStore('editor', {
       this.updateTabIdToIndex() // Update before sending it out to prevent stale mappings.
 
       if (this.currentFile == null && this.tabs.length > 0) {
-        this.currentFile =
-          this.tabs[tabIndex] ?? this.tabs[tabIndex - 1] ?? this.tabs[0] ?? null
+        this.currentFile = this.tabs[tabIndex] ?? this.tabs[tabIndex - 1] ?? this.tabs[0] ?? null
         this.selectionWordCount = null
         if (this.currentFile && typeof this.currentFile.markdown === 'string') {
           const { id, markdown, cursor, history, pathname, scrollTop, blocks, muyaIndexCursor } =
@@ -1287,7 +1295,10 @@ export const useEditorStore = defineStore('editor', {
     NEW_UNTITLED_TAB({
       markdown: markdownString,
       selected
-    }: { markdown?: string; selected?: boolean }): void {
+    }: {
+      markdown?: string
+      selected?: boolean
+    }): void {
       if (selected == null) {
         selected = true
       }
@@ -1569,11 +1580,11 @@ export const useEditorStore = defineStore('editor', {
       }
 
       const { windowId } = window.marktext?.env ?? { windowId: -1 }
-      window.electron.ipcRenderer.send(
-        'mt::editor-selection-changed',
-        windowId,
-        createApplicationMenuState(changes)
-      )
+      const menuState = createApplicationMenuState(changes)
+      const menuStateJson = JSON.stringify(menuState)
+      if (this.currentFile && menuStateJson === lastSelectionMenuStateJson) return
+      lastSelectionMenuStateJson = menuStateJson
+      window.electron.ipcRenderer.send('mt::editor-selection-changed', windowId, menuState)
     },
 
     // Persist the caret for a tab without the heavy content-change pipeline. A
@@ -1593,11 +1604,11 @@ export const useEditorStore = defineStore('editor', {
 
     SELECTION_FORMATS(formats: SelectionFormat[]): void {
       const { windowId } = window.marktext?.env ?? { windowId: -1 }
-      window.electron.ipcRenderer.send(
-        'mt::update-format-menu',
-        windowId,
-        createSelectionFormatState(formats)
-      )
+      const formatState = createSelectionFormatState(formats)
+      const formatStateJson = JSON.stringify(formatState)
+      if (formatStateJson === lastFormatMenuStateJson) return
+      lastFormatMenuStateJson = formatStateJson
+      window.electron.ipcRenderer.send('mt::update-format-menu', windowId, formatState)
     },
 
     EXPORT({ type, content, pageOptions }: ExportPayload): void {
@@ -1864,10 +1875,7 @@ const getRootFolderFromState = (projectStore: ProjectStoreLike): string => {
  * @param markdown The text to trim.
  * @param trimTrailingNewlineOption The option how we should trim the final newlines.
  */
-const adjustTrailingNewlines = (
-  markdown: string,
-  trimTrailingNewlineOption: number
-): string => {
+const adjustTrailingNewlines = (markdown: string, trimTrailingNewlineOption: number): string => {
   if (!markdown) {
     return ''
   }
@@ -2040,9 +2048,7 @@ const createApplicationMenuState = ({
 /**
  * Creates a object that contains the formats selection state.
  */
-export const createSelectionFormatState = (
-  formats: SelectionFormat[]
-): Record<string, boolean> => {
+export const createSelectionFormatState = (formats: SelectionFormat[]): Record<string, boolean> => {
   const state: Record<string, boolean> = {}
   for (const item of formats) {
     // Underline/superscript/subscript/highlight are carried as `html_tag`
@@ -2144,11 +2150,11 @@ interface BufferedEditorState {
 const createBufferedEditorState = (state: unknown): BufferedEditorState | null => {
   const s = state as
     | {
-      tabs?: unknown
-      currentFileId?: string
-      currentFile?: { id?: string } | null
-      restoreWarnings?: unknown
-    }
+        tabs?: unknown
+        currentFileId?: string
+        currentFile?: { id?: string } | null
+        restoreWarnings?: unknown
+      }
     | null
     | undefined
   if (!s || !Array.isArray(s.tabs)) {
@@ -2160,8 +2166,8 @@ const createBufferedEditorState = (state: unknown): BufferedEditorState | null =
     tabs: (s.tabs as Array<Partial<IFileState> & { id: string }>).map(createBufferedTabState),
     restoreWarnings: Array.isArray(s.restoreWarnings)
       ? (s.restoreWarnings as RestoreWarning[])
-        .map(createBufferedRestoreWarning)
-        .filter((w): w is BufferedRestoreWarning => w !== null)
+          .map(createBufferedRestoreWarning)
+          .filter((w): w is BufferedRestoreWarning => w !== null)
       : []
   }
 }

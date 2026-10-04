@@ -1,4 +1,5 @@
 import fs from 'fs'
+import fsPromises from 'fs/promises'
 import path from 'path'
 import writeFileAtomic from 'write-file-atomic'
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
@@ -33,6 +34,9 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
   bufferStores: Record<string, BufferStoreEntry> | null
   serviceName: string
   encryptKeys: string[]
+  private readonly writeQueues = new Map<string, Promise<void>>()
+  private readonly writeErrors = new Map<string, unknown>()
+  private readonly revisions = new Map<string, number>()
 
   constructor(paths: EditorBufferStorePaths) {
     super()
@@ -68,27 +72,15 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return this.bufferStores
   }
 
-  clearBufferStoresWithAllSaved(): void {
-    this.bufferStores = this.getAllBufferStores()
-
-    for (const id in this.bufferStores) {
-      try {
-        const buffer = this.readBufferStoreFile(this.bufferStores[id].filePath)
-        const allSaved = buffer.tabs.every((file) => file.isSaved)
-        if (buffer.tabs.length === 0 || allSaved) {
-          try {
-            fs.unlinkSync(this.bufferStores[id].filePath)
-          } catch (e) {
-            console.error('Failed to delete buffer store file during clear', e)
-          }
-        }
-      } catch (e) {
-        console.error('Failed to read buffer store file during clear', e)
-      }
-    }
+  async clearBufferStoresWithAllSaved(): Promise<void> {
+    const entries = Object.values(this.getAllBufferStores())
+    await Promise.all(entries.map((entry) => this.removeSavedBuffer(entry)))
   }
 
-  handleClose(restoreBufferId: string | undefined, editorWindows: EditorWindow[]): void {
+  async handleClose(
+    restoreBufferId: string | undefined,
+    editorWindows: EditorWindow[]
+  ): Promise<void> {
     // If > 1 window is present, and the window being closed has all files
     // saved, we can delete its saved buffer.
 
@@ -106,21 +98,62 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
       return
     }
 
+    const entry = this.bufferStores[restoreBufferId]
+    await this.flushFile(entry.filePath)
     if (editorWindows.length > 1) {
-      if (!fs.existsSync(this.bufferStores[restoreBufferId].filePath)) {
-        return
-      }
-      try {
-        const buffer = this.readBufferStoreFile(this.bufferStores[restoreBufferId].filePath)
-        const allSaved = buffer.tabs.every((file) => file.isSaved)
-        if (buffer.tabs.length === 0 || allSaved) {
-          fs.unlinkSync(this.bufferStores[restoreBufferId].filePath)
-          delete this.bufferStores[restoreBufferId]
-        }
-      } catch (e) {
-        console.error('Failed to read or parse buffer store file during cleanup', e)
-      }
+      await this.removeSavedBuffer(entry)
     }
+    await this.flushFile(entry.filePath)
+  }
+
+  private async removeSavedBuffer(entry: BufferStoreEntry): Promise<void> {
+    const revision = this.revisions.get(entry.filePath)
+    await this.enqueue(entry.filePath, async () => {
+      if (this.writeErrors.has(entry.filePath)) return
+      try {
+        const buffer = await this.readBufferStoreFile(entry.filePath)
+        if (
+          buffer.tabs.every((tab) => tab.isSaved) &&
+          this.revisions.get(entry.filePath) === revision
+        ) {
+          await fsPromises.unlink(entry.filePath)
+          // An update queued during unlink will recreate the file; retain its index.
+          if (this.revisions.get(entry.filePath) === revision) {
+            delete this.bufferStores?.[entry.id]
+          }
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          console.error('Failed to clean up editor buffer:', error)
+        }
+      }
+    })
+  }
+
+  private enqueue(filePath: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.writeQueues.get(filePath) ?? Promise.resolve()
+    const next = previous.catch(() => undefined).then(operation)
+    this.writeQueues.set(filePath, next)
+    const release = (): void => {
+      if (this.writeQueues.get(filePath) === next) this.writeQueues.delete(filePath)
+    }
+    next.then(release, release)
+    return next
+  }
+
+  private async flushFile(filePath: string): Promise<void> {
+    while (this.writeQueues.has(filePath)) {
+      await this.writeQueues.get(filePath)
+    }
+    if (this.writeErrors.has(filePath)) throw this.writeErrors.get(filePath)
+  }
+
+  /** Wait for accepted snapshots, including updates received while a write is pending. */
+  async flush(): Promise<void> {
+    while (this.writeQueues.size) {
+      await Promise.all([...this.writeQueues.values()])
+    }
+    if (this.writeErrors.size) throw this.writeErrors.values().next().value
   }
 
   findEditorBufferStores(dir: string): Record<string, BufferStoreEntry> {
@@ -161,8 +194,8 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return this.bufferStores[restoreBufferId]
   }
 
-  readBufferStoreFile(filePath: string): BufferStoreContent {
-    const content = fs.readFileSync(filePath, 'utf8')
+  async readBufferStoreFile(filePath: string): Promise<BufferStoreContent> {
+    const content = await fsPromises.readFile(filePath, 'utf8')
     if (!content.trim()) {
       throw new Error('Buffer store file is empty.')
     }
@@ -175,16 +208,23 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return buffer
   }
 
-  writeBufferStoreFile(filePath: string, newState: unknown): void {
-    // Durable atomic write: write-file-atomic writes to a temp file, fsyncs it,
-    // then renames it over the target. The previous temp-file + rename here was
-    // namespace-atomic (crash-safe) but omitted the fsync, so a power loss could
-    // still leave this crash-recovery buffer — which holds unsaved tab content —
-    // truncated or zero-filled, the same gap the document save path had (#3786).
-    writeFileAtomic.sync(filePath, JSON.stringify(newState), 'utf8')
+  writeBufferStoreFile(filePath: string, newState: unknown): Promise<void> {
+    // Capture before yielding: renderer snapshots can be mutated by their caller.
+    const payload = JSON.stringify(newState)
+    this.revisions.set(filePath, (this.revisions.get(filePath) ?? 0) + 1)
+    return this.enqueue(filePath, async () => {
+      try {
+        // Atomic replacement alone is insufficient for unsaved recovery content (#3786).
+        await writeFileAtomic(filePath, payload, { encoding: 'utf8', fsync: true })
+        this.writeErrors.delete(filePath)
+      } catch (error) {
+        this.writeErrors.set(filePath, error)
+        throw error
+      }
+    })
   }
 
-  updateBufferState(e: IpcMainInvokeEvent, newState: unknown): boolean {
+  async updateBufferState(e: IpcMainInvokeEvent, newState: unknown): Promise<boolean> {
     const win = BrowserWindow.fromWebContents(e.sender)
     const restoreBufferId = (win as unknown as { restoreBufferId?: string })?.restoreBufferId
 
@@ -194,7 +234,7 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     }
 
     const bufferStore = this.getBufferStoreInfo(restoreBufferId)
-    this.writeBufferStoreFile(bufferStore.filePath, newState)
+    await this.writeBufferStoreFile(bufferStore.filePath, newState)
     return true
   }
 

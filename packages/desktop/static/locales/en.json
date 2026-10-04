@@ -121,6 +121,7 @@
       "sourceCodeMode": "Source Code Mode",
       "typewriterMode": "Typewriter Mode",
       "focusMode": "Focus Mode",
+      "readOnlyMode": "Read Only",
       "toggleTableOfContents": "Toggle Table of Contents",
       "reloadImages": "Reload Images",
       "showDeveloperTools": "Show Developer Tools",
@@ -204,6 +205,7 @@
       "paste": "Paste",
       "rename": "Rename",
       "moveToTrash": "Move To Trash",
+      "copyPath": "Copy Path",
       "showInFolder": "Show In Folder"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "Source Code Mode",
       "typewriterMode": "Typewriter Mode",
       "focusMode": "Focus Mode",
+      "readOnlyMode": "Read Only",
       "toggleSourceCodeMode": "Toggle Source Code Mode",
       "toggleTypewriterMode": "Toggle Typewriter Mode",
       "toggleFocusMode": "Toggle Focus Mode",

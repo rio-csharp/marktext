@@ -16,6 +16,7 @@ export interface IUserPreferences {
   sidebarColumn?: number
   fileSortBy?: string
   fileSortOrder?: string
+  readOnly?: boolean
   startUpAction?: string
   defaultDirectoryToOpen?: string
   language?: string
@@ -79,5 +80,7 @@ export interface LayoutState {
   rightColumn: 'files' | 'search' | 'toc'
   showSideBar: boolean
   showTabBar: boolean
+  showOutlinePanel?: boolean
+  outlinePanelWidth?: number
   [key: string]: unknown
 }

@@ -1,8 +1,5 @@
 <template>
-  <div
-    ref="sourceCodeContainer"
-    class="source-code"
-  />
+  <div ref="sourceCodeContainer" class="source-code" />
 </template>
 
 <script setup lang="ts">
@@ -38,6 +35,7 @@ const editor = shallowRef<CodeMirror.Editor | null>(null)
 const commitTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 const viewDestroyed = ref(false)
 const tabId = ref<string | null>(null)
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null
 
 const {
   theme,
@@ -46,7 +44,8 @@ const {
   texMathDollars,
   texMathGfm,
   texMathSingleBackslash,
-  texMathDoubleBackslash
+  texMathDoubleBackslash,
+  readOnly
 } = storeToRefs(preferencesStore)
 const { currentFile: currentTab } = storeToRefs(editorStore)
 
@@ -120,17 +119,30 @@ const getMarkdownAndCursor = (cm: CodeMirror.Editor) => {
  * This is to write the OLD content of the editor before switching to another tab
  * @param id
  */
-const prepareTabSwitch = () => {
-  if (commitTimer.value) clearTimeout(commitTimer.value)
-  if (tabId.value && editor.value) {
-    const { cursor, markdown: newMarkdown } = getMarkdownAndCursor(editor.value)
+const flushSnapshot = (): void => {
+  if (snapshotTimer) {
+    clearTimeout(snapshotTimer)
+    snapshotTimer = null
+  }
+  if (tabId.value && editor.value && !viewDestroyed.value) {
+    const { cursor, markdown } = getMarkdownAndCursor(editor.value)
     editorStore.LISTEN_FOR_CONTENT_CHANGE({
       id: tabId.value,
-      markdown: newMarkdown,
+      markdown,
+      wordCount: getWordCount(markdown),
       muyaIndexCursor: cursor
     })
-    tabId.value = null
   }
+}
+
+const scheduleSnapshot = (): void => {
+  if (snapshotTimer) clearTimeout(snapshotTimer)
+  snapshotTimer = setTimeout(flushSnapshot, 300)
+}
+
+const prepareTabSwitch = () => {
+  flushSnapshot()
+  if (tabId.value) tabId.value = null
 }
 
 interface FileChangePayloadLike {
@@ -184,6 +196,7 @@ const handleFileChange = (payload: unknown) => {
   if (typeof newMarkdown === 'string') {
     editor.value.setValue(newMarkdown)
   }
+  editor.value.setOption('readOnly', readOnly.value)
 
   // t('editor.sourceCode.cursorNullComment')
   if (isValidMuyaIndexCursor(muyaIndexCursor)) {
@@ -222,7 +235,7 @@ const handleSelectAll = () => {
 }
 
 const handleUndo = () => {
-  if (!sourceCode.value) {
+  if (!sourceCode.value || readOnly.value) {
     return
   }
 
@@ -232,7 +245,7 @@ const handleUndo = () => {
 }
 
 const handleRedo = () => {
-  if (!sourceCode.value) {
+  if (!sourceCode.value || readOnly.value) {
     return
   }
 
@@ -248,6 +261,7 @@ interface ImageActionPayload {
 }
 
 const handleImageAction = (payload: unknown) => {
+  if (readOnly.value) return
   const cm = editor.value
   if (!cm) return
 
@@ -323,30 +337,18 @@ const updateSelectionWordCount = (cm: CodeMirror.Editor) => {
 }
 
 const saveContent = (cm: CodeMirror.Editor) => {
-  const { cursor, markdown: newMarkdown } = getMarkdownAndCursor(cm)
-  // Attention: the cursor may be `{focus: null, anchor: null}` when press `backspace`
-  const wordCount = getWordCount(newMarkdown)
-  // See "beforeDestroy" note
-  if (!viewDestroyed.value) {
-    if (tabId.value) {
-      editorStore.LISTEN_FOR_CONTENT_CHANGE({
-        id: tabId.value,
-        markdown: newMarkdown,
-        wordCount,
-        muyaIndexCursor: cursor
-      })
-    } else {
-      // This may occur during tab switching but should not occur otherwise.
-      console.warn('LISTEN_FOR_CONTENT_CHANGE: Cannot commit changes because not tab id was set!')
-    }
-  }
+  if (readOnly.value || viewDestroyed.value || !tabId.value) return
+  // Dirty state is immediate; serializing markdown is deferred until typing pauses.
+  editorStore.MARK_DIRTY(tabId.value)
+  scheduleSnapshot()
+  updateSelectionWordCount(cm)
 }
 
 const listenChange = (cm: CodeMirror.Editor) => {
-  cm.on('cursorActivity', (instance: CodeMirror.Editor) => {
-    saveContent(instance)
-    updateSelectionWordCount(instance)
+  cm.on('change', (instance: CodeMirror.Editor, change: { origin?: string }) => {
+    if (change.origin !== 'setValue') saveContent(instance)
   })
+  cm.on('cursorActivity', (instance: CodeMirror.Editor) => updateSelectionWordCount(instance))
 }
 
 // #3580: in Source Code mode the WYSIWYG container is hidden, so the
@@ -354,13 +356,11 @@ const listenChange = (cm: CodeMirror.Editor) => {
 // CodeMirror instead. Resolve the TOC entry to its heading line in the source.
 const handleScrollToHeader = (slug: unknown) => {
   if (!editor.value) return
-  const index = editorStore.listToc.findIndex(item => item.slug === slug)
+  const index = editorStore.listToc.findIndex((item) => item.slug === slug)
   if (index < 0) return
   const line = findMarkdownHeadingLine(editor.value.getValue(), index)
   if (line < 0) return
-  // `.source-code` is the scroll container (CodeMirror renders full-height with
-  // viewportMargin: Infinity, so its own scroller never scrolls).
-  scrollSourceEditorToLine(editor.value, line, sourceCodeContainer.value)
+  scrollSourceEditorToLine(editor.value, line, editor.value.getScrollerElement())
 }
 
 onMounted(() => {
@@ -382,7 +382,8 @@ onMounted(() => {
     lineWrapping: true,
     styleActiveLine: true,
     direction: textDirection,
-    viewportMargin: Infinity
+    viewportMargin: 20,
+    readOnly: readOnly.value
   }
 
   if (railscastsThemes.includes(theme.value)) {
@@ -398,6 +399,7 @@ onMounted(() => {
   bus.on('redo', handleRedo)
   bus.on('image-action', handleImageAction)
   bus.on('scroll-to-header', handleScrollToHeader)
+  bus.on('flush-active-editor', flushSnapshot)
 
   // CodeMirror's line tree relies on object identity and must not be proxied by Vue.
   const codeMirrorInstance = markRaw(codeMirror(container, codeMirrorConfig))
@@ -421,10 +423,13 @@ onMounted(() => {
   tabId.value = id
   updateSelectionWordCount(codeMirrorInstance)
 
+  watch(readOnly, (value) => editor.value?.setOption('readOnly', value))
+
   listenChange(codeMirrorInstance)
 })
 
 onBeforeUnmount(() => {
+  flushSnapshot()
   viewDestroyed.value = true
   if (commitTimer.value) clearTimeout(commitTimer.value)
 
@@ -437,6 +442,7 @@ onBeforeUnmount(() => {
   editorStore.SET_SELECTION_WORD_COUNT(null)
   lastSelectionKey = ''
   bus.off('scroll-to-header', handleScrollToHeader)
+  bus.off('flush-active-editor', flushSnapshot)
 
   if (editor.value) {
     const { cursor, markdown: newMarkdown } = getMarkdownAndCursor(editor.value)
@@ -454,13 +460,16 @@ onBeforeUnmount(() => {
 .source-code {
   height: calc(100vh - var(--titleBarHeight));
   box-sizing: border-box;
-  overflow: auto;
+  overflow: hidden;
 }
 .source-code .CodeMirror {
-  height: auto;
-  margin: 50px auto;
+  height: 100%;
+  margin: 0 auto;
   max-width: var(--editorAreaWidth);
   background: transparent;
+}
+.source-code .CodeMirror-lines {
+  padding: 50px 0;
 }
 .source-code .CodeMirror-gutters {
   border-right: none;

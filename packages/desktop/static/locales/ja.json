@@ -121,6 +121,7 @@
       "sourceCodeMode": "ソースコードモード",
       "typewriterMode": "タイプライターモード",
       "focusMode": "フォーカスモード",
+      "readOnlyMode": "読み取り専用",
       "toggleTableOfContents": "目次の切り替え",
       "reloadImages": "画像の再読み込み",
       "showDeveloperTools": "開発者ツールの表示",
@@ -204,6 +205,7 @@
       "paste": "貼り付け",
       "rename": "名前の変更",
       "moveToTrash": "ごみ箱に移動",
+      "copyPath": "パスのコピー",
       "showInFolder": "フォルダーの表示"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "ソースコードモード",
       "typewriterMode": "タイプライターモード",
       "focusMode": "フォーカスモード",
+      "readOnlyMode": "読み取り専用",
       "toggleSourceCodeMode": "ソースコードモードの切り替え",
       "toggleTypewriterMode": "タイプライターモードの切り替え",
       "toggleFocusMode": "フォーカスモードの切り替え",

@@ -1,6 +1,13 @@
-import { ref, watch } from 'vue'
+import { ref, watch, onScopeDispose } from 'vue'
 import { defineStore } from 'pinia'
-import { addFile, unlinkFile, addDirectory, unlinkDirectory, resortTree, updateFileMtime } from './treeCtrl'
+import {
+  addFile,
+  unlinkFile,
+  addDirectory,
+  unlinkDirectory,
+  resortTree,
+  updateFileMtime
+} from './treeCtrl'
 import { usePreferencesStore } from './preferences'
 import bus from '../bus'
 import { create, paste, rename, type FileCreateType, type PasteOptions } from '../util/fileSystem'
@@ -86,6 +93,19 @@ export const useProjectStore = defineStore('project', () => {
   const pendingTreeEvents = ref<PendingEvent[]>([])
 
   const preferencesStore = usePreferencesStore()
+  const sidebarListeners = new Map<string, (payload: unknown) => void>()
+
+  const listenForSidebar = (event: string, handler: (payload: unknown) => void): void => {
+    const previous = sidebarListeners.get(event)
+    if (previous) bus.off(event, previous)
+    sidebarListeners.set(event, handler)
+    bus.on(event, handler)
+  }
+
+  onScopeDispose(() => {
+    for (const [event, handler] of sidebarListeners) bus.off(event, handler)
+    sidebarListeners.clear()
+  })
 
   watch(
     [() => preferencesStore.fileSortBy, () => preferencesStore.fileSortOrder],
@@ -168,10 +188,21 @@ export const useProjectStore = defineStore('project', () => {
     const editorStore = useEditorStore()
     switch (type) {
       case 'add': {
-        const { pathname, data, isMarkdown } = change
-        addFile(projectTree.value!, change as Parameters<typeof addFile>[1], String(preferencesStore.fileSortBy), String(preferencesStore.fileSortOrder))
+        const { pathname, data, isMarkdown, name } = change
+        addFile(
+          projectTree.value!,
+          change as Parameters<typeof addFile>[1],
+          String(preferencesStore.fileSortBy),
+          String(preferencesStore.fileSortOrder)
+        )
         if (isMarkdown && newFileNameCache.value && pathname === newFileNameCache.value) {
-          const fileState = getFileStateFromData(data as Record<string, unknown>)
+          // Only app-created files are known to be empty; scanned files load on open.
+          const seed = data ?? {
+            pathname,
+            filename: typeof name === 'string' ? name : window.path.basename(pathname),
+            markdown: ''
+          }
+          const fileState = getFileStateFromData(seed as Record<string, unknown>)
           editorStore.UPDATE_CURRENT_FILE(fileState)
           newFileNameCache.value = ''
         }
@@ -189,7 +220,12 @@ export const useProjectStore = defineStore('project', () => {
         break
       case 'change':
         if (change?.mtimeMs !== undefined) {
-          updateFileMtime(projectTree.value!, change as Parameters<typeof updateFileMtime>[1], String(preferencesStore.fileSortBy), String(preferencesStore.fileSortOrder))
+          updateFileMtime(
+            projectTree.value!,
+            change as Parameters<typeof updateFileMtime>[1],
+            String(preferencesStore.fileSortBy),
+            String(preferencesStore.fileSortOrder)
+          )
         }
         break
       default:
@@ -220,17 +256,22 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function LISTEN_FOR_SIDEBAR_CONTEXT_MENU(): void {
-    bus.on('SIDEBAR::show-in-folder', () => {
+    listenForSidebar('SIDEBAR::copy-path', (pathname) => {
+      if (typeof pathname === 'string' && pathname && window.path.isAbsolute(pathname)) {
+        window.electron.clipboard.writeText(pathname)
+      }
+    })
+    listenForSidebar('SIDEBAR::show-in-folder', () => {
       const { pathname } = activeItem.value
       window.electron.shell.showItemInFolder(pathname)
     })
-    bus.on('SIDEBAR::new', (type: unknown) => {
+    listenForSidebar('SIDEBAR::new', (type: unknown) => {
       const { pathname, isDirectory } = activeItem.value
       const dirname = isDirectory ? pathname : window.path.dirname(pathname)
       createCache.value = { dirname, type: String(type) }
       bus.emit('SIDEBAR::show-new-input')
     })
-    bus.on('SIDEBAR::remove', async() => {
+    listenForSidebar('SIDEBAR::remove', async () => {
       const { pathname } = activeItem.value
       if (typeof pathname !== 'string' || !pathname) return
       try {
@@ -247,11 +288,11 @@ export const useProjectStore = defineStore('project', () => {
         })
       }
     })
-    bus.on('SIDEBAR::copy-cut', (type: unknown) => {
+    listenForSidebar('SIDEBAR::copy-cut', (type: unknown) => {
       const { pathname: src } = activeItem.value
       clipboard.value = { type: String(type), src }
     })
-    bus.on('SIDEBAR::paste', async() => {
+    listenForSidebar('SIDEBAR::paste', async () => {
       const cb = clipboard.value
       const { pathname, isDirectory } = activeItem.value
       const dirname = isDirectory ? pathname : window.path.dirname(pathname)
@@ -302,7 +343,7 @@ export const useProjectStore = defineStore('project', () => {
           })
       }
     })
-    bus.on('SIDEBAR::rename', () => {
+    listenForSidebar('SIDEBAR::rename', () => {
       const { pathname } = activeItem.value
       renameCache.value = pathname
       bus.emit('SIDEBAR::show-rename-input')

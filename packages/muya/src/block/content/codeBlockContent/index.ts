@@ -91,6 +91,9 @@ const LANG_HASH = {
     'math-block': 'latex',
 };
 
+const HIGHLIGHT_DEFER_THRESHOLD = 5000;
+const HIGHLIGHT_DEFER_DELAY = 100;
+
 function hasStateMeta(
     state: CodeContentState,
 ): state is ICodeBlockState | IDiagramState | IFrontmatterState {
@@ -202,14 +205,22 @@ class CodeBlockContent extends Content {
             && /\S/.test(code)
             && loadedLanguages.has(fullLengthLang)
         ) {
-            const wrapper = document.createElement('div');
-            wrapper.classList.add(`language-${fullLengthLang}`);
-            wrapper.innerHTML = code;
-            prism.highlightElement(wrapper, false, function (this: HTMLElement) {
-                replaceIfChanged(domNode, this.innerHTML + trailingBreak);
-            });
+            if (text.length > HIGHLIGHT_DEFER_THRESHOLD) {
+                replaceIfChanged(domNode, code + trailingBreak);
+                this._scheduleHighlight(code, trailingBreak, fullLengthLang);
+            }
+            else {
+                this._cancelScheduledHighlight();
+                const wrapper = document.createElement('div');
+                wrapper.classList.add(`language-${fullLengthLang}`);
+                wrapper.innerHTML = code;
+                prism.highlightElement(wrapper, false, function (this: HTMLElement) {
+                    replaceIfChanged(domNode, this.innerHTML + trailingBreak);
+                });
+            }
         }
         else {
+            this._cancelScheduledHighlight();
             replaceIfChanged(domNode, code + trailingBreak);
         }
 
@@ -217,6 +228,34 @@ class CodeBlockContent extends Content {
         // Re-render the math/diagram/html preview too; undo/redo reaches this
         // block only through update(), not inputHandler (#1632).
         this._updatePreviewIfHave(text);
+    }
+
+    private _highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+    private _cancelScheduledHighlight() {
+        if (this._highlightTimer !== null) {
+            clearTimeout(this._highlightTimer);
+            this._highlightTimer = null;
+        }
+    }
+
+    private _scheduleHighlight(code: string, trailingBreak: string, lang: string) {
+        this._cancelScheduledHighlight();
+        this._highlightTimer = setTimeout(() => {
+            this._highlightTimer = null;
+            const { domNode } = this;
+            if (!domNode || !domNode.isConnected)
+                return;
+            const cursor = this.getCursor();
+            const wrapper = document.createElement('div');
+            wrapper.classList.add(`language-${lang}`);
+            wrapper.innerHTML = code;
+            prism.highlightElement(wrapper, false, function (this: HTMLElement) {
+                replaceIfChanged(domNode, this.innerHTML + trailingBreak);
+            });
+            if (cursor)
+                this.setCursor(cursor.start.offset, cursor.end.offset, false);
+        }, HIGHLIGHT_DEFER_DELAY);
     }
 
     private _lastLineCount = -1;

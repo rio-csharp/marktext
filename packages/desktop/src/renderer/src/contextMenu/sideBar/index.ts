@@ -6,6 +6,7 @@ import {
   getCUT,
   getPASTE,
   getRENAME,
+  getCopyPath,
   getDELETE,
   getShowInFolder
 } from './menuItems'
@@ -13,7 +14,8 @@ import { popupContextMenu, type ContextMenuItem } from '../popupMenu'
 
 export const showContextMenu = (
   event: { clientX: number; clientY: number },
-  hasPathCache: boolean
+  hasPathCache: boolean,
+  pathname: string = ''
 ): void => {
   const contextItems: ContextMenuItem[] = [
     getNewFile(),
@@ -24,6 +26,8 @@ export const showContextMenu = (
     getPASTE(),
     SEPARATOR,
     getRENAME(),
+    // The native menu callback may arrive after the sidebar selection changes.
+    getCopyPath(pathname),
     getDELETE(),
     SEPARATOR,
     getShowInFolder()

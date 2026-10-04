@@ -118,6 +118,7 @@ export interface PreferencesState {
   typewriter: boolean
   focus: boolean
   sourceCode: boolean
+  readOnly: boolean
 
   // ----- User config -----
   imageFolderPath: string
@@ -138,7 +139,7 @@ interface SetUserDataPayload {
 }
 
 interface ModeTogglePayload {
-  type: keyof PreferencesState | 'typewriter' | 'focus' | 'sourceCode'
+  type: keyof PreferencesState | 'typewriter' | 'focus' | 'sourceCode' | 'readOnly'
   checked: boolean
 }
 
@@ -152,7 +153,7 @@ export const usePreferencesStore = defineStore('preferences', {
     zoom: 1.0,
     hideScrollbar: false,
     wordWrapInToc: false,
-    fileSortBy: 'created',
+    fileSortBy: 'title',
     fileSortOrder: 'asc',
     startUpAction: 'restoreAll',
     restoreLayoutState: true,
@@ -238,6 +239,7 @@ export const usePreferencesStore = defineStore('preferences', {
     typewriter: false, // typewriter mode
     focus: false,
     sourceCode: false, // source code mode
+    readOnly: false,
 
     // user configration
     imageFolderPath: '',

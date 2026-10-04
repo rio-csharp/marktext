@@ -10,6 +10,7 @@ export class Search {
     private _value: string = '';
     public matches: IMatch[] = [];
     public index: number = -1;
+    private _highlightedBlocks = new Map<Content, IHighlight[]>();
 
     get value() {
         return this._value;
@@ -27,48 +28,54 @@ export class Search {
         this._value = '';
         this.matches = [];
         this.index = -1;
+        this._highlightedBlocks.clear();
     }
 
-    // `blocks` limits the re-render to those blocks; omitted, every block with
-    // a match is re-rendered.
-    private _updateMatches(isClear = false, blocks?: Set<Content>) {
+    private _sameHighlights(a: IHighlight[], b: IHighlight[]) {
+        return a.length === b.length
+            && a.every((highlight, index) => {
+                const other = b[index];
+                return highlight.start === other.start
+                    && highlight.end === other.end
+                    && highlight.active === other.active;
+            });
+    }
+
+    private _renderMatches() {
         const { matches, index } = this;
-        let i;
-        const len = matches.length;
-        const matchesMap = new Map<Content, IHighlight[]>();
-
-        for (i = 0; i < len; i++) {
+        const next = new Map<Content, IHighlight[]>();
+        for (let i = 0; i < matches.length; i++) {
             const { block, start, end } = matches[i];
-            if (blocks && !blocks.has(block))
-                continue;
-
-            const active = i === index;
-            const highlight: IHighlight = { start, end, active };
-            const highlights = matchesMap.get(block);
-
-            if (matchesMap.has(block) && Array.isArray(highlights)) {
+            const highlight = { start, end, active: i === index };
+            const highlights = next.get(block);
+            if (highlights)
                 highlights.push(highlight);
-                matchesMap.set(block, highlights);
-            }
-            else {
-                matchesMap.set(block, [highlight]);
-            }
+            else
+                next.set(block, [highlight]);
         }
 
-        for (const [block, highlights] of matchesMap.entries()) {
+        for (const [block, highlights] of this._highlightedBlocks) {
+            if (next.has(block) || !block.outMostBlock)
+                continue;
+            block.update(undefined, []);
+            if (block.parent?.active && !highlights.some((highlight) => highlight.active))
+                block.blurHandler();
+        }
+
+        for (const [block, highlights] of next) {
             if (!block.outMostBlock)
                 continue;
-
-            const isActive = highlights.some(h => h.active);
-
-            block.update(undefined, isClear ? [] : highlights);
-
+            const previous = this._highlightedBlocks.get(block);
+            if (previous && this._sameHighlights(previous, highlights))
+                continue;
+            const isActive = highlights.some((highlight) => highlight.active);
+            block.update(undefined, highlights);
             if (block.parent?.active && !isActive)
                 block.blurHandler();
-
-            if (isActive && !isClear)
+            if (isActive)
                 block.focusHandler();
         }
+        this._highlightedBlocks = next;
     }
 
     private _innerReplace(matches: IMatch[], replacementOf: (match: IMatch) => string) {
@@ -140,17 +147,9 @@ export class Search {
         if (index >= len)
             index = 0;
 
-        // Moving the active match only changes the blocks holding the old and
-        // the new one.
-        const changed = new Set<Content>([matches[index].block]);
-        const prev = matches[this.index];
-        if (prev)
-            changed.add(prev.block);
-
         this.index = index;
 
-        this._updateMatches(true, changed);
-        this._updateMatches(false, changed);
+        this._renderMatches();
 
         return this;
     }
@@ -170,9 +169,6 @@ export class Search {
         // `selectHighlight` request can drop the cursor back onto it when the
         // new search has no match of its own (e.g. closing the search bar).
         const prevActiveMatch = this.matches[this.index];
-
-        // Empty last search.
-        this._updateMatches(true);
 
         // Highlight current search.
         if (value) {
@@ -208,7 +204,7 @@ export class Search {
 
         Object.assign(this, { _value: value, matches, index });
 
-        this._updateMatches();
+        this._renderMatches();
 
         // Restore the editor cursor onto the active match. Mirrors muyajs's
         // `render(selectHighlight)` -> `setCursor()` path: closing the search

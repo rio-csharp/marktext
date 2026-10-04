@@ -1,8 +1,7 @@
-import fs from 'fs'
+import fs from 'fs/promises'
 import path from 'path'
 import { app, Menu, ipcMain, BrowserWindow } from 'electron'
 import log from 'electron-log'
-import { ensureDirSync, isDirectory2, isFile2 } from 'common/filesystem'
 import { isOsx, isWindows } from '../config'
 import { updateSidebarMenu } from '../menu/actions/edit'
 import { updateFormatMenu } from '../menu/actions/format'
@@ -48,17 +47,21 @@ class AppMenu {
   public readonly isOsxOrWindows: boolean
   public activeWindowId: number
   public windowMenus: Map<number, WindowMenuEntry>
+  private _recentDocuments: string[] = []
+  private _recentMutations: Array<string | null> = []
+  private _recentsLoaded = false
+  private readonly _recentsReady: Promise<void>
+  private _recentRevision = 0
+  private _persistedRecentRevision = 0
+  private _recentWrite: Promise<void> | null = null
+  private _recentMenuTimer: NodeJS.Immediate | null = null
 
   /**
    * @param preferences The preferences instances.
    * @param keybindings The keybindings instances.
    * @param userDataPath The user data path.
    */
-  constructor(
-    preferences: Preference,
-    keybindings: Keybindings,
-    userDataPath: string
-  ) {
+  constructor(preferences: Preference, keybindings: Keybindings, userDataPath: string) {
     this._preferences = preferences
     this._keybindings = keybindings
     this._userDataPath = userDataPath
@@ -67,6 +70,7 @@ class AppMenu {
     this.isOsxOrWindows = isOsx || isWindows
     this.activeWindowId = -1
     this.windowMenus = new Map()
+    this._recentsReady = isOsx ? Promise.resolve() : this._loadRecentDocuments()
 
     // Initialize main process language from preferences
     this._initializeLanguage()
@@ -80,78 +84,101 @@ class AppMenu {
    * @param filePath The file or directory full path.
    */
   addRecentlyUsedDocument(filePath: string): void {
-    const { isOsxOrWindows, RECENTS_PATH } = this
-
-    if (isOsxOrWindows) app.addRecentDocument(filePath)
+    if (this.isOsxOrWindows) app.addRecentDocument(filePath)
     if (isOsx) return
 
-    const recentDocuments = this.getRecentlyUsedDocuments()
-    const index = recentDocuments.indexOf(filePath)
-    let needSave = index !== 0
-    if (index > 0) {
-      recentDocuments.splice(index, 1)
-    }
-    if (index !== 0) {
-      recentDocuments.unshift(filePath)
-    }
-
-    if (recentDocuments.length > MAX_RECENTLY_USED_DOCUMENTS) {
-      needSave = true
-      recentDocuments.splice(
-        MAX_RECENTLY_USED_DOCUMENTS,
-        recentDocuments.length - MAX_RECENTLY_USED_DOCUMENTS
-      )
-    }
-
-    this.updateAppMenu(recentDocuments)
-
-    if (needSave) {
-      ensureDirSync(this._userDataPath)
-      const json = JSON.stringify(recentDocuments, null, 2)
-      fs.writeFileSync(RECENTS_PATH, json, 'utf-8')
-    }
+    if (!this._recentsLoaded) this._recentMutations.push(filePath)
+    this._recentDocuments = addRecentPath(this._recentDocuments, filePath)
+    this._recentRevision++
+    this._scheduleRecentUpdate()
   }
 
   /**
    * Returns a list of all recently used documents and folders.
    */
   getRecentlyUsedDocuments(): string[] {
-    const { RECENTS_PATH } = this
-    if (!isFile2(RECENTS_PATH)) {
-      return []
-    }
-
-    try {
-      const recentDocuments: string[] = JSON.parse(fs.readFileSync(RECENTS_PATH, 'utf-8')).filter(
-        (f: string) => f && (isFile2(f) || isDirectory2(f))
-      )
-
-      if (recentDocuments.length > MAX_RECENTLY_USED_DOCUMENTS) {
-        recentDocuments.splice(
-          MAX_RECENTLY_USED_DOCUMENTS,
-          recentDocuments.length - MAX_RECENTLY_USED_DOCUMENTS
-        )
-      }
-      return recentDocuments
-    } catch (err) {
-      log.error('Error while read recently used documents:', err)
-      return []
-    }
+    return [...this._recentDocuments]
   }
 
   /**
    * Clear recently used documents.
    */
   clearRecentlyUsedDocuments(): void {
-    const { isOsxOrWindows, RECENTS_PATH } = this
-    if (isOsxOrWindows) app.clearRecentDocuments()
+    if (this.isOsxOrWindows) app.clearRecentDocuments()
     if (isOsx) return
 
-    const recentDocuments: string[] = []
-    this.updateAppMenu(recentDocuments)
-    const json = JSON.stringify(recentDocuments, null, 2)
-    ensureDirSync(this._userDataPath)
-    fs.writeFileSync(RECENTS_PATH, json, 'utf-8')
+    if (!this._recentsLoaded) this._recentMutations.push(null)
+    this._recentDocuments = []
+    this._recentRevision++
+    this._scheduleRecentUpdate()
+  }
+
+  private async _loadRecentDocuments(): Promise<void> {
+    let documents: string[] = []
+    try {
+      if (await isRecentPath(this.RECENTS_PATH, false)) {
+        const parsed: unknown = JSON.parse(await fs.readFile(this.RECENTS_PATH, 'utf8'))
+        if (Array.isArray(parsed)) {
+          const paths = [
+            ...new Set(parsed.filter((p): p is string => typeof p === 'string' && !!p))
+          ]
+          const valid = await Promise.all(paths.map((p) => isRecentPath(p)))
+          documents = paths.filter((_p, i) => valid[i]).slice(0, MAX_RECENTLY_USED_DOCUMENTS)
+        }
+      }
+    } catch (error) {
+      log.error('Failed to read recently used documents:', error)
+    }
+    // Opening or clearing recents during disk hydration must win over the old file.
+    for (const mutation of this._recentMutations) {
+      documents = mutation === null ? [] : addRecentPath(documents, mutation)
+    }
+    this._recentMutations = []
+    this._recentDocuments = documents
+    this._recentsLoaded = true
+    this._scheduleRecentUpdate()
+  }
+
+  private _scheduleRecentUpdate(): void {
+    if (this._recentMenuTimer) return
+    this._recentMenuTimer = setImmediate(() => {
+      this._recentMenuTimer = null
+      this.updateAppMenu()
+      this._writeRecents().catch((error) => {
+        log.error('Failed to write recently used documents:', error)
+      })
+    })
+  }
+
+  private _writeRecents(): Promise<void> {
+    if (this._recentWrite) return this._recentWrite
+    const write = async (): Promise<void> => {
+      await this._recentsReady
+      while (this._persistedRecentRevision !== this._recentRevision) {
+        const revision = this._recentRevision
+        const payload = JSON.stringify(this._recentDocuments, null, 2)
+        await fs.mkdir(this._userDataPath, { recursive: true })
+        await fs.writeFile(this.RECENTS_PATH, payload, 'utf8')
+        this._persistedRecentRevision = revision
+      }
+    }
+    const pending = write()
+    this._recentWrite = pending
+    const release = (): void => {
+      if (this._recentWrite === pending) this._recentWrite = null
+    }
+    pending.then(release, release)
+    return pending
+  }
+
+  async flushRecentDocuments(): Promise<void> {
+    await this._recentsReady
+    if (this._recentMenuTimer) {
+      clearImmediate(this._recentMenuTimer)
+      this._recentMenuTimer = null
+      this.updateAppMenu()
+    }
+    await this._writeRecents()
   }
 
   /**
@@ -306,6 +333,8 @@ class AppMenu {
       updateMenuItem(oldMenu, newMenu, 'sourceCodeModeMenuItem')
       updateMenuItem(oldMenu, newMenu, 'typewriterModeMenuItem')
       updateMenuItem(oldMenu, newMenu, 'focusModeMenuItem')
+      updateMenuItem(oldMenu, newMenu, 'readOnlyModeMenuItem')
+      updateMenuItem(oldMenu, newMenu, 'tocMenuItem')
       updateMenuItem(oldMenu, newMenu, 'sideBarMenuItem')
       updateMenuItem(oldMenu, newMenu, 'tabBarMenuItem')
 
@@ -335,6 +364,8 @@ class AppMenu {
         updateMenuItem(oldMenu, rebuilt, 'sourceCodeModeMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'typewriterModeMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'focusModeMenuItem')
+        updateMenuItem(oldMenu, rebuilt, 'readOnlyModeMenuItem')
+        updateMenuItem(oldMenu, rebuilt, 'tocMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'sideBarMenuItem')
         updateMenuItem(oldMenu, rebuilt, 'tabBarMenuItem')
         newMenu = rebuilt
@@ -569,7 +600,7 @@ class AppMenu {
       this.clearRecentlyUsedDocuments()
     })
 
-    onInternalChannel('broadcast-preferences-changed', async(prefs: Partial<IUserPreferences>) => {
+    onInternalChannel('broadcast-preferences-changed', async (prefs: Partial<IUserPreferences>) => {
       if (prefs.theme !== undefined || prefs.followSystemTheme !== undefined) {
         this.updateAppMenu()
       }
@@ -586,6 +617,23 @@ class AppMenu {
         this.updateAppMenu()
       }
     })
+  }
+}
+
+const addRecentPath = (documents: string[], pathname: string): string[] =>
+  [pathname, ...documents.filter((p) => p !== pathname)].slice(0, MAX_RECENTLY_USED_DOCUMENTS)
+
+const isRecentPath = async (pathname: string, allowDirectory = true): Promise<boolean> => {
+  try {
+    let info = await fs.lstat(pathname)
+    // Match isFile2/isDirectory2: one symlink hop, not recursive stat resolution.
+    if (info.isSymbolicLink()) {
+      const target = path.resolve(path.dirname(pathname), await fs.readlink(pathname))
+      info = await fs.lstat(target)
+    }
+    return info.isFile() || (allowDirectory && info.isDirectory())
+  } catch {
+    return false
   }
 }
 

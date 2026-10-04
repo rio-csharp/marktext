@@ -121,6 +121,7 @@
       "sourceCodeMode": "소스 코드 모드",
       "typewriterMode": "타자기 모드",
       "focusMode": "집중 모드",
+      "readOnlyMode": "읽기 전용",
       "toggleTableOfContents": "목차 토글",
       "reloadImages": "이미지 새로고침",
       "showDeveloperTools": "개발자 도구 보기",
@@ -204,6 +205,7 @@
       "paste": "붙여넣기",
       "rename": "이름 바꾸기",
       "moveToTrash": "휴지통으로 이동",
+      "copyPath": "경로 복사",
       "showInFolder": "폴더에서 보기"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "소스 코드 모드",
       "typewriterMode": "타자기 모드",
       "focusMode": "집중 모드",
+      "readOnlyMode": "읽기 전용",
       "toggleSourceCodeMode": "소스 코드 모드 토글",
       "toggleTypewriterMode": "타자기 모드 토글",
       "toggleFocusMode": "집중 모드 토글",

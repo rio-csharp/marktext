@@ -121,6 +121,7 @@
       "sourceCodeMode": "Режим исходного кода",
       "typewriterMode": "Режим печатной машинки",
       "focusMode": "Режим фокусировки",
+      "readOnlyMode": "Только чтение",
       "toggleTableOfContents": "Показать/скрыть оглавление",
       "reloadImages": "Обновить изображения",
       "showDeveloperTools": "Инструменты разработчика",
@@ -204,6 +205,7 @@
       "paste": "Вставить",
       "rename": "Переименовать",
       "moveToTrash": "Переместить в корзину",
+      "copyPath": "Копировать путь",
       "showInFolder": "Показать в папке"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "Режим исходного кода",
       "typewriterMode": "Режим печатной машинки",
       "focusMode": "Режим фокусировки",
+      "readOnlyMode": "Только чтение",
       "toggleSourceCodeMode": "Режим исходного кода",
       "toggleTypewriterMode": "Режим печатной машинки",
       "toggleFocusMode": "Режим фокусировки",

@@ -121,6 +121,7 @@
       "sourceCodeMode": "源码模式",
       "typewriterMode": "打字机模式",
       "focusMode": "专注模式",
+      "readOnlyMode": "只读模式",
       "toggleTableOfContents": "切换目录",
       "reloadImages": "重新加载图片",
       "showDeveloperTools": "显示开发者工具",
@@ -204,6 +205,7 @@
       "paste": "粘贴",
       "rename": "重命名",
       "moveToTrash": "移动到废纸篓",
+      "copyPath": "复制路径",
       "showInFolder": "在文件夹中显示"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "源码模式",
       "typewriterMode": "打字机模式",
       "focusMode": "专注模式",
+      "readOnlyMode": "只读模式",
       "toggleSourceCodeMode": "切换源码模式",
       "toggleTypewriterMode": "切换打字机模式",
       "toggleFocusMode": "切换专注模式",

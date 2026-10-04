@@ -17,6 +17,7 @@
         :muya-index-cursor="muyaIndexCursor"
         :text-direction="textDirection"
       />
+      <file-navigation />
     </div>
     <tab-notifications />
   </div>
@@ -29,6 +30,7 @@ import Tabs from './tabs.vue'
 import Editor from './editor.vue'
 import SourceCode from './sourceCode.vue'
 import TabNotifications from './notifications.vue'
+import FileNavigation from './fileNavigation.vue'
 
 defineProps<{
   markdown: string
@@ -57,6 +59,7 @@ const { effectiveSideBarWidth } = storeToRefs(useLayoutStore())
   overflow: hidden;
   background: var(--editorBgColor);
   & > .container {
+    position: relative;
     flex: 1;
     overflow: hidden;
   }

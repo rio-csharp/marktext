@@ -236,8 +236,9 @@ class Format extends Content {
         offset: number,
         type: Token['type'],
         includeEnd = false,
+        tokens?: Token[],
     ): Nullable<Token> {
-        const tokens = tokenizer(text, {
+        tokens ??= tokenizer(text, {
             hasBeginRules: false,
             options: this.muya.options,
         });
@@ -268,14 +269,10 @@ class Format extends Content {
         return result;
     }
 
-    private _checkNotSameToken(oldText: string, text: string) {
+    private _checkNotSameToken(oldText: string, text: string, oldTokens?: Token[], tokens?: Token[]) {
         const { options } = this.muya;
-        const oldTokens = tokenizer(oldText, {
-            options,
-        });
-        const tokens = tokenizer(text, {
-            options,
-        });
+        oldTokens ??= tokenizer(oldText, { options });
+        tokens ??= tokenizer(text, { options });
 
         const oldCache: Record<string, number> = {};
         const cache: Record<string, number> = {};
@@ -306,7 +303,7 @@ class Format extends Content {
     }
 
     // TODO: @JOCS remove use this.selection directly
-    checkNeedRender(cursor: IRenderCursor = { anchor: this.selection.anchor ?? undefined, focus: this.selection.focus ?? undefined }) {
+    checkNeedRender(cursor: IRenderCursor = { anchor: this.selection.anchor ?? undefined, focus: this.selection.focus ?? undefined }, tokens?: Token[]) {
         const { labels } = this.inlineRenderer;
         const { text } = this;
         const { start: cStart, end: cEnd, anchor, focus } = cursor;
@@ -316,7 +313,7 @@ class Format extends Content {
             return false;
         const NO_NEED_TOKEN_REG = /text|hard_line_break|soft_line_break/;
 
-        for (const token of tokenizer(text, {
+        for (const token of tokens ?? tokenizer(text, {
             labels,
             options: this.muya.options,
         })) {
@@ -628,16 +625,23 @@ class Format extends Content {
         ]);
         // Also counts the caret right after the `$` that closed the formula, so
         // typing `$$x$$` does not pair that `$` into `$$x$$$`.
+        const textContentTokens = tokenizer(textContent, {
+            hasBeginRules: false,
+            options: this.muya.options,
+        });
         const isInInlineMath = !!this._checkCursorInTokenType(
             textContent,
             start.offset,
             'inline_math',
             true,
+            textContentTokens,
         );
         const isInInlineCode = !!this._checkCursorInTokenType(
             textContent,
             start.offset,
             'inline_code',
+            false,
+            textContentTokens,
         );
 
         let { needRender, text } = this.autoPair(
@@ -650,7 +654,14 @@ class Format extends Content {
             'format',
         );
 
-        if (this._checkNotSameToken(this.text, text))
+        const newTokens = tokenizer(text, {
+            labels: this.inlineRenderer.labels,
+            options: this.muya.options,
+        });
+        const oldTokens = this.text === text
+            ? newTokens
+            : tokenizer(this.text, { labels: this.inlineRenderer.labels, options: this.muya.options });
+        if (this._checkNotSameToken(this.text, text, oldTokens, newTokens))
             needRender = true;
 
         const inputData = 'data' in event && typeof event.data === 'string' ? event.data : null;
@@ -668,7 +679,7 @@ class Format extends Content {
             },
         };
 
-        const checkMarkedUpdate = this.checkNeedRender(cursor);
+        const checkMarkedUpdate = this.checkNeedRender(cursor, newTokens);
 
         if (checkMarkedUpdate || needRender)
             this.update(cursor);
@@ -683,6 +694,8 @@ class Format extends Content {
                 this.text,
                 start.offset,
                 'emoji',
+                false,
+                newTokens,
             );
             if (emojiToken && isEmojiToken(emojiToken)) {
                 const { content: emojiText } = emojiToken;

@@ -8,6 +8,7 @@
       { current: currentFile?.pathname === file.pathname, active: file.id === activeItem.id }
     ]"
     @click="handleFileClick"
+    @contextmenu.prevent="handleContextMenu"
   >
     <file-icon :name="file.name" />
     <input
@@ -18,13 +19,13 @@
       class="rename"
       @click.stop="noop"
       @keypress.enter="rename"
-    >
+    />
     <span v-else>{{ file.name }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useProjectStore } from '@/store/project'
 import { useEditorStore } from '@/store/editor'
@@ -84,16 +85,17 @@ const rename = (): void => {
   }
 }
 
-onMounted(() => {
-  if (fileEl.value) {
-    fileEl.value.addEventListener('contextmenu', (event) => {
-      event.preventDefault()
-      projectStore.CHANGE_ACTIVE_ITEM(props.file)
-      showContextMenu(event, !!clipboard.value)
-    })
-  }
+const handleContextMenu = (event: MouseEvent): void => {
+  projectStore.CHANGE_ACTIVE_ITEM(props.file)
+  showContextMenu(event, !!clipboard.value, props.file.pathname)
+}
 
+onMounted(() => {
   bus.on('SIDEBAR::show-rename-input', focusRenameInput)
+})
+
+onUnmounted(() => {
+  bus.off('SIDEBAR::show-rename-input', focusRenameInput)
 })
 </script>
 

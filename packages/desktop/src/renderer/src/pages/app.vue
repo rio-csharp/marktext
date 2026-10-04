@@ -14,10 +14,7 @@
         :is-saved="isSaved"
       />
 
-      <div
-        v-if="!init"
-        class="editor-placeholder"
-      />
+      <div v-if="!init" class="editor-placeholder" />
       <recent v-if="!hasCurrentFile && init" />
       <editor-with-tabs
         v-if="hasCurrentFile && init"
@@ -35,6 +32,7 @@
       <rename />
       <import-modal />
     </div>
+    <outline-panel v-if="init" />
   </div>
 </template>
 
@@ -47,6 +45,7 @@ import Recent from '@/components/recent/index.vue'
 import EditorWithTabs from '@/components/editorWithTabs/index.vue'
 import TitleBar from '@/components/titleBar/index.vue'
 import SideBar from '@/components/sideBar/index.vue'
+import OutlinePanel from '@/components/outlinePanel/index.vue'
 import AboutDialog from '@/components/about/index.vue'
 import CommandPalette from '@/components/commandPalette/index.vue'
 import ExportSettingDialog from '@/components/exportSettings/index.vue'

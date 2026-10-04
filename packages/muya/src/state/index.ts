@@ -1,7 +1,7 @@
 import type { Doc, JSONOp, JSONOpList, Path } from 'ot-json1';
 import type { Muya } from '../muya';
 import type { TDiff } from '../utils';
-import type { TState } from './types';
+import type { TContainerState, TState } from './types';
 import * as json1 from 'ot-json1';
 import { deepClone } from '../utils';
 import logger from '../utils/logger';
@@ -80,6 +80,8 @@ class JSONState {
             this._setState(content);
         else
             this._setMarkdown(content);
+
+        this._muya.editor?.inlineRenderer?.invalidateLabels?.();
     }
 
     private _setState(state: TState[]) {
@@ -222,19 +224,28 @@ class JSONState {
     dispatch(op: JSONOp, source = 'user' /* user, api */) {
         const prevDoc = this.getState();
         this._apply(op);
-        // TODO: remove doc in future
-        const doc = this.getState();
-        debug.log(JSON.stringify(op));
-        this._muya.eventCenter.emit('json-change', {
-            op,
-            source,
-            prevDoc,
-            doc,
-        });
+        if (logger.enabled('log'))
+            debug.log(JSON.stringify(op));
+        if (op !== null)
+            this._muya.editor?.inlineRenderer?.invalidateLabels?.();
+        this._emitJsonChange(op, source, prevDoc);
     }
 
     getState(): TState[] {
         return deepClone(this._state);
+    }
+
+    // Visitors borrow the immutable ot-json1 snapshot; they must not mutate it.
+    traverseStates(visitor: (state: TState) => void) {
+        const walk = (states: TState[]) => {
+            for (const state of states) {
+                visitor(state);
+                const { children } = state as TContainerState;
+                if (Array.isArray(children))
+                    walk(children);
+            }
+        };
+        walk(this._state);
     }
 
     getMarkdown() {
@@ -294,8 +305,6 @@ class JSONState {
         );
         const prevDoc = this.getState();
         this._apply(op);
-        // TODO: remove doc in future
-        const doc = this.getState();
         // Clear before emitting: a listener that edits synchronously then starts
         // a fresh batch instead of mutating the one being flushed.
         this._operationCache = [];
@@ -303,11 +312,21 @@ class JSONState {
         if (op === null)
             return;
 
+        this._emitJsonChange(op, 'user', prevDoc);
+    }
+
+    private _emitJsonChange(op: JSONOp, source: string, prevDoc: TState[]) {
+        // Capture this event's snapshot, not the state at getter invocation:
+        // listeners may retain the payload or synchronously dispatch another op.
+        const snapshot = this._state;
+        let doc: TState[] | undefined;
         this._muya.eventCenter.emit('json-change', {
             op,
-            source: 'user',
+            source,
             prevDoc,
-            doc,
+            get doc() {
+                return doc ??= deepClone(snapshot);
+            },
         });
     }
 }

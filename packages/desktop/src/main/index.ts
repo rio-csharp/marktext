@@ -39,7 +39,7 @@ const initializeLogger = (env: AppEnvironment): void => {
     return path.join(env.paths.logPath, 'main.log')
   }
   log.transports.file.level = getLogLevel()
-  log.transports.file.sync = true
+  log.transports.file.sync = false
   log.errorHandler.startCatching({
     onError(error: unknown) {
       // This callback receives the full Error object with stack

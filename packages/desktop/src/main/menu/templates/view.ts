@@ -3,7 +3,7 @@ import * as actions from '../actions/view'
 import { t } from '../../i18n'
 import type Keybindings from '../../keyboard/shortcutHandler'
 
-export default function(keybindings: Keybindings): MenuItemConstructorOptions {
+export default function (keybindings: Keybindings): MenuItemConstructorOptions {
   const submenu: MenuItemConstructorOptions[] = [
     {
       label: t('menu.view.commandPalette'),
@@ -14,6 +14,16 @@ export default function(keybindings: Keybindings): MenuItemConstructorOptions {
     },
     {
       type: 'separator'
+    },
+    {
+      id: 'readOnlyModeMenuItem',
+      label: t('menu.view.readOnlyMode'),
+      accelerator: keybindings.getAccelerator('view.read-only-mode') ?? undefined,
+      type: 'checkbox',
+      checked: false,
+      click(_item, focusedWindow) {
+        actions.toggleReadOnlyMode(focusedWindow as BrowserWindow | undefined)
+      }
     },
     {
       id: 'sourceCodeModeMenuItem',
@@ -72,6 +82,8 @@ export default function(keybindings: Keybindings): MenuItemConstructorOptions {
       label: t('menu.view.toggleTableOfContents'),
       id: 'tocMenuItem',
       accelerator: keybindings.getAccelerator('view.toggle-toc') ?? undefined,
+      type: 'checkbox',
+      checked: true,
       click(_, focusedWindow) {
         actions.showTableOfContents(focusedWindow as BrowserWindow | undefined)
       }

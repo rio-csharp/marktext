@@ -121,6 +121,7 @@
       "sourceCodeMode": "Broncodeweergave",
       "typewriterMode": "Typemachinestand",
       "focusMode": "Focusstand",
+      "readOnlyMode": "Alleen-lezen",
       "toggleTableOfContents": "Inhoudsopgave in-/uitschakelen",
       "reloadImages": "Afbeeldingen herladen",
       "showDeveloperTools": "Ontwikkelaarshulpmiddelen tonen",
@@ -204,6 +205,7 @@
       "paste": "Plakken",
       "rename": "Hernoemen",
       "moveToTrash": "Naar prullenbak",
+      "copyPath": "Pad kopiëren",
       "showInFolder": "Tonen in map"
     },
     "tabs": {
@@ -855,6 +857,7 @@
       "sourceCodeMode": "Broncodeweergave",
       "typewriterMode": "Typemachinestand",
       "focusMode": "Focusstand",
+      "readOnlyMode": "Alleen-lezen",
       "toggleSourceCodeMode": "Broncodeweergave in-/uitschakelen",
       "toggleTypewriterMode": "Typemachinestand in-/uitschakelen",
       "toggleFocusMode": "Focusstand in-/uitschakelen",
