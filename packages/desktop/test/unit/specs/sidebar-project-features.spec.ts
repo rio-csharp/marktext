@@ -4,7 +4,7 @@ import path from 'node:path'
 
 const mocks = vi.hoisted(() => ({
   updateFile: vi.fn(),
-  create: vi.fn(async () => {}),
+  create: vi.fn(async() => {}),
   stateFromData: vi.fn((data: unknown) => data),
   menus: [] as Array<Array<{ id?: string; enabled?: boolean; click?: () => void }>>
 }))
@@ -46,13 +46,13 @@ beforeEach(() => {
   Object.assign(window, {
     path: path.posix,
     fileUtils: {
-      pathExists: vi.fn(async () => false),
+      pathExists: vi.fn(async() => false),
       hasMarkdownExtension: (name: string) => name.endsWith('.md')
     },
     electron: {
       clipboard: { writeText: vi.fn() },
       shell: { showItemInFolder: vi.fn() },
-      ipcRenderer: { on: vi.fn(() => vi.fn()), send: vi.fn(), invoke: vi.fn(async () => false) }
+      ipcRenderer: { on: vi.fn(() => vi.fn()), send: vi.fn(), invoke: vi.fn(async() => false) }
     }
   })
   setActivePinia(createPinia())
@@ -161,7 +161,7 @@ describe('sidebar native context-menu targeting and cleanup', () => {
     expect(window.electron.clipboard.writeText).toHaveBeenCalledTimes(1)
   })
 
-  it('preserves selection when trash is cancelled and clears it only on success', async () => {
+  it('preserves selection when trash is cancelled and clears it only on success', async() => {
     project.LISTEN_FOR_SIDEBAR_CONTEXT_MENU()
     project.CHANGE_ACTIVE_ITEM({ pathname: '/docs/a.md', isFile: true })
     bus.emit('SIDEBAR::remove')
@@ -173,7 +173,7 @@ describe('sidebar native context-menu targeting and cleanup', () => {
     expect(project.activeItem).toEqual({})
   })
 
-  it('does not clear a different selection when an earlier trash operation completes', async () => {
+  it('does not clear a different selection when an earlier trash operation completes', async() => {
     project.LISTEN_FOR_SIDEBAR_CONTEXT_MENU()
     let finish!: (value: boolean) => void
     vi.mocked(window.electron.ipcRenderer.invoke).mockReturnValueOnce(

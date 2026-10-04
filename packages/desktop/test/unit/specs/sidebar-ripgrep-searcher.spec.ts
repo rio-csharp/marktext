@@ -30,13 +30,13 @@ beforeEach(() => {
   )
   window.ripgrep = {
     ...subscriptions,
-    start: vi.fn(async (req: unknown) => ({ searchId: (req as { searchId: string }).searchId })),
+    start: vi.fn(async(req: unknown) => ({ searchId: (req as { searchId: string }).searchId })),
     cancel: vi.fn()
   } as unknown as typeof window.ripgrep
 })
 
 describe('sidebar ripgrep IPC compatibility and lifetime', () => {
-  it('delivers single and batched text matches without accepting other search IDs', async () => {
+  it('delivers single and batched text matches without accepting other search IDs', async() => {
     const didMatch = vi.fn()
     const request = new RipgrepDirectorySearcher().search(['/docs'], 'text', { didMatch })
     const searchId = lastId()
@@ -55,7 +55,7 @@ describe('sidebar ripgrep IPC compatibility and lifetime', () => {
     expect(window.ripgrep.cancel).not.toHaveBeenCalled()
   })
 
-  it('also flattens file-search batches', async () => {
+  it('also flattens file-search batches', async() => {
     const didMatch = vi.fn()
     const request = new FileSearcher().search(['/docs'], '', { didMatch })
     const searchId = lastId()
@@ -65,7 +65,7 @@ describe('sidebar ripgrep IPC compatibility and lifetime', () => {
     expect(didMatch.mock.calls).toEqual([['/docs/a.md'], ['/docs/b.md']])
   })
 
-  it('settles cancellation locally, ignores queued dead-ID callbacks, and stops mid-batch', async () => {
+  it('settles cancellation locally, ignores queued dead-ID callbacks, and stops mid-batch', async() => {
     const didMatch = vi.fn(() => request.cancel())
     const didSearchPaths = vi.fn()
     const request = new RipgrepDirectorySearcher().search(['/docs'], 'text', {
@@ -86,7 +86,7 @@ describe('sidebar ripgrep IPC compatibility and lifetime', () => {
     expect(activeListenerCount()).toBe(0)
   })
 
-  it('keeps concurrent requests isolated when one is cancelled', async () => {
+  it('keeps concurrent requests isolated when one is cancelled', async() => {
     const firstMatch = vi.fn()
     const first = new RipgrepDirectorySearcher().search(['/docs'], 'one', { didMatch: firstMatch })
     const firstId = lastId()
@@ -105,7 +105,7 @@ describe('sidebar ripgrep IPC compatibility and lifetime', () => {
     expect(activeListenerCount()).toBe(0)
   })
 
-  it('cleans up rejected starts and main-process errors', async () => {
+  it('cleans up rejected starts and main-process errors', async() => {
     vi.mocked(window.ripgrep.start).mockRejectedValueOnce(new Error('start failed'))
     await expect(new RipgrepDirectorySearcher().search(['/docs'], 'text', {})).rejects.toThrow(
       'start failed'

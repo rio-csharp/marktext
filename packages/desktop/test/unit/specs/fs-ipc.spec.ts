@@ -13,14 +13,14 @@ vi.mock('electron', () => ({
 import { registerFsHandlers } from 'main_renderer/ipc/fs'
 
 let directory: string
-beforeAll(async () => {
+beforeAll(async() => {
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'marktext-fs-ipc-'))
   registerFsHandlers()
 })
-afterAll(async () => fs.remove(directory))
+afterAll(async() => fs.remove(directory))
 
 describe('filesystem IPC predicates', () => {
-  it('inspects the entry itself, so symlinks are not files or directories', async () => {
+  it('inspects the entry itself, so symlinks are not files or directories', async() => {
     const file = path.join(directory, 'file')
     const subdirectory = path.join(directory, 'directory')
     const fileLink = path.join(directory, 'file-link')
@@ -42,13 +42,13 @@ describe('filesystem IPC predicates', () => {
     expect(await isDirectory({}, directoryLink)).toBe(false)
   })
 
-  it('returns false for missing paths and filesystem errors', async () => {
+  it('returns false for missing paths and filesystem errors', async() => {
     const missing = path.join(directory, 'missing')
     expect(await handlers.get('mt::fs::is-file')!({}, missing)).toBe(false)
     expect(await handlers.get('mt::fs::is-directory')!({}, missing)).toBe(false)
   })
 
-  it('follows symlinks for executable files and requires X_OK access', async () => {
+  it('follows symlinks for executable files and requires X_OK access', async() => {
     const file = path.join(directory, 'executable')
     const link = path.join(directory, 'executable-link')
     await fs.writeFile(file, '#!/bin/sh\n', { mode: 0o755 })

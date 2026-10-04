@@ -120,7 +120,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     vi.useRealTimers()
   })
 
-  it('buffers metadata-only adds until ready and reuses chokidar stats', async () => {
+  it('buffers metadata-only adds until ready and reuses chokidar stats', async() => {
     watcher.watch(win, '/project')
     api.emit('add', '/project/note.md', stats)
     expect(send).not.toHaveBeenCalled()
@@ -148,7 +148,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(preferences.getAll).not.toHaveBeenCalled()
   })
 
-  it('falls back to stat for directory adds and changes without loading content', async () => {
+  it('falls back to stat for directory adds and changes without loading content', async() => {
     watcher.watch(win, '/project')
     api.emit('add', '/project/note.md')
     api.emit('change', '/project/note.md')
@@ -160,7 +160,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
-  it('reuses change stats and handles events after startup', async () => {
+  it('reuses change stats and handles events after startup', async() => {
     watcher.watch(win, '/project')
     api.emit('ready')
     await drainAll()
@@ -177,7 +177,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
-  it('yields between startup chunks and retains live events behind the replay', async () => {
+  it('yields between startup chunks and retains live events behind the replay', async() => {
     watcher.watch(win, '/project')
     for (let index = 0; index < 1001; index++) {
       api.emit('add', `/project/${index}.md`, stats)
@@ -205,7 +205,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(immediateCallbacks.size).toBe(0)
   })
 
-  it('does not allow unlink or change to overtake an add awaiting stat', async () => {
+  it('does not allow unlink or change to overtake an add awaiting stat', async() => {
     const pending = deferred<Stats>()
     mocks.stat.mockReturnValueOnce(pending.promise)
     watcher.watch(win, '/project')
@@ -229,7 +229,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     ])
   })
 
-  it('ignores vanished files without blocking later replay events or notifying', async () => {
+  it('ignores vanished files without blocking later replay events or notifying', async() => {
     mocks.stat.mockRejectedValueOnce(new Error('ENOENT'))
     watcher.watch(win, '/project')
     api.emit('add', '/project/gone.md')
@@ -247,7 +247,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
 
   it.each(['add', 'change'])(
     'file %s still reloads content with preferences and stats',
-    async (event) => {
+    async(event) => {
       vi.mocked(preferences.getPreferredEol).mockReturnValue('crlf')
       vi.mocked(preferences.getAll).mockReturnValue({
         autoGuessEncoding: false,
@@ -268,7 +268,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     }
   )
 
-  it.each(['add', 'change'])('file %s reports content read errors', async (event) => {
+  it.each(['add', 'change'])('file %s reports content read errors', async(event) => {
     mocks.load.mockRejectedValueOnce(new Error('read failed'))
     watcher.watch(win, '/project/note.md', 'file')
     await api.emit(event, '/project/note.md', stats)
@@ -280,7 +280,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     })
   })
 
-  it('still suppresses editor-originated single-file updates', async () => {
+  it('still suppresses editor-originated single-file updates', async() => {
     watcher.watch(win, '/project/note.md', 'file')
     watcher.ignoreChangedEvent(win.id, '/project/note.md')
     await api.emit('change', '/project/note.md', stats)
@@ -288,7 +288,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
-  it('reuses stats when checking delayed editor-originated events', async () => {
+  it('reuses stats when checking delayed editor-originated events', async() => {
     watcher.watch(win, '/project/note.md', 'file')
     const now = new Date()
     watcher.ignoreChangedEvent(win.id, '/project/note.md', -1)
@@ -302,7 +302,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
 
   it.each(['returned close', 'unwatch', 'unwatchByWindowId', 'close all'])(
     '%s cancels queued replay and late events',
-    async (method) => {
+    async(method) => {
       const close = watcher.watch(win, '/project')
       api.emit('add', '/project/note.md', stats)
       api.emit('ready')
@@ -326,7 +326,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     }
   )
 
-  it('stops replay if disposal occurs during delivery of a chunk', async () => {
+  it('stops replay if disposal occurs during delivery of a chunk', async() => {
     const close = watcher.watch(win, '/project')
     send.mockImplementationOnce(() => close())
     api.emit('add', '/project/first.md', stats)
@@ -338,7 +338,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
 
   it.each(['add', 'change'])(
     'does not deliver directory %s after an in-flight stat',
-    async (event) => {
+    async(event) => {
       const pending = deferred<Stats>()
       mocks.stat.mockReturnValueOnce(pending.promise)
       const close = watcher.watch(win, '/project')
@@ -356,7 +356,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
 
   it.each(['add', 'change'])(
     'does not deliver file %s or an error after an in-flight load',
-    async (event) => {
+    async(event) => {
       const pending = deferred<typeof data>()
       mocks.load.mockReturnValueOnce(pending.promise)
       const close = watcher.watch(win, '/project/note.md', 'file')
@@ -371,7 +371,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     }
   )
 
-  it('does not start a reload after an in-flight ignore check finishes following disposal', async () => {
+  it('does not start a reload after an in-flight ignore check finishes following disposal', async() => {
     const pending = deferred<boolean>()
     vi.spyOn(watcher, '_shouldIgnoreEvent').mockReturnValueOnce(pending.promise)
     const close = watcher.watch(win, '/project/note.md', 'file')
@@ -383,7 +383,7 @@ describe('watcher metadata, ordered replay and disposal', () => {
     expect(mocks.load).not.toHaveBeenCalled()
   })
 
-  it('does not restart a Linux file watcher after disposal during the rename existence check', async () => {
+  it('does not restart a Linux file watcher after disposal during the rename existence check', async() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const pending = deferred<boolean>()
     mocks.exists.mockReturnValueOnce(pending.promise)

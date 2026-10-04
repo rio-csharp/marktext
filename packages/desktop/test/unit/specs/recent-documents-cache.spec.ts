@@ -34,8 +34,8 @@ import AppMenu from 'main_renderer/menu'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise
+  const promise = new Promise<T>((_resolve) => {
+    resolve = _resolve
   })
   return { promise, resolve }
 }
@@ -58,12 +58,12 @@ beforeEach(() => {
   writeFile.mockResolvedValue(undefined)
   mkdir.mockResolvedValue(undefined)
 })
-afterEach(async () => {
+afterEach(async() => {
   await Promise.all(stores.splice(0).map((menu) => menu.flushRecentDocuments()))
 })
 
 describe('in-memory recent documents', () => {
-  it('merges opens during startup with hydrated recents without synchronous disk access', async () => {
+  it('merges opens during startup with hydrated recents without synchronous disk access', async() => {
     const disk = deferred<string>()
     readFile.mockReturnValueOnce(disk.promise)
     const menu = createMenu()
@@ -83,7 +83,7 @@ describe('in-memory recent documents', () => {
     expect(JSON.parse(writeFile.mock.calls.at(-1)![1])).toEqual(menu.getRecentlyUsedDocuments())
   })
 
-  it('a startup clear is a barrier against restoring older disk entries', async () => {
+  it('a startup clear is a barrier against restoring older disk entries', async() => {
     const disk = deferred<string>()
     readFile.mockReturnValueOnce(disk.promise)
     const menu = createMenu()
@@ -95,7 +95,7 @@ describe('in-memory recent documents', () => {
     expect(menu.getRecentlyUsedDocuments()).toEqual(['/notes/after-clear.md'])
   })
 
-  it('coalesces bursts to one menu rebuild and one write', async () => {
+  it('coalesces bursts to one menu rebuild and one write', async() => {
     const menu = createMenu()
     await menu.flushRecentDocuments()
     menu.addEditorMenu({ id: 1 } as never)
@@ -112,7 +112,7 @@ describe('in-memory recent documents', () => {
     expect(menu.getRecentlyUsedDocuments()).toHaveLength(12)
   })
 
-  it('serializes writes and includes changes accepted during an in-flight write', async () => {
+  it('serializes writes and includes changes accepted during an in-flight write', async() => {
     const menu = createMenu()
     await menu.flushRecentDocuments()
     const first = deferred<void>()
@@ -133,11 +133,11 @@ describe('in-memory recent documents', () => {
     expect(JSON.parse(writeFile.mock.calls[1][1])).toEqual(['/notes/last.md'])
   })
 
-  it('preserves one-hop symlink validation and excludes broken links', async () => {
+  it('preserves one-hop symlink validation and excludes broken links', async() => {
     readFile.mockResolvedValueOnce(
       JSON.stringify(['/notes/link.md', '/notes/broken.md', '/notes/chain.md'])
     )
-    lstat.mockImplementation(async (pathname: string) => {
+    lstat.mockImplementation(async(pathname: string) => {
       if (
         pathname.endsWith('link.md') ||
         pathname.endsWith('broken.md') ||
@@ -149,7 +149,7 @@ describe('in-memory recent documents', () => {
       if (pathname.endsWith('missing.md')) throw new Error('missing')
       return regularFile
     })
-    readlink.mockImplementation(async (pathname: string) => {
+    readlink.mockImplementation(async(pathname: string) => {
       if (pathname.endsWith('link.md')) return 'target.md'
       if (pathname.endsWith('chain.md')) return 'second.md'
       return 'missing.md'

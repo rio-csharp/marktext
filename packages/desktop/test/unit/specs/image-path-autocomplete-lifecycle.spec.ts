@@ -44,7 +44,7 @@ const deferred = () => {
   return { promise, resolve: settleResolve, reject: settleReject }
 }
 
-const settle = async (): Promise<void> => {
+const settle = async(): Promise<void> => {
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
@@ -67,7 +67,7 @@ afterEach(() => {
 })
 
 describe('image-path autocomplete async listing', () => {
-  it('uses dirents without synchronous per-entry stats and preserves lstat symlink exclusions', async () => {
+  it('uses dirents without synchronous per-entry stats and preserves lstat symlink exclusions', async() => {
     const lstat = vi.spyOn(fs, 'lstatSync')
     const stat = vi.spyOn(fs, 'statSync')
     const readdir = vi.spyOn(fs, 'readdirSync')
@@ -92,7 +92,7 @@ describe('image-path autocomplete async listing', () => {
     expect(readdir).not.toHaveBeenCalled()
   })
 
-  it('shares the initial scan while filtering each caller independently', async () => {
+  it('shares the initial scan while filtering each caller independently', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const first = searchFilesAndDir('/pictures', 'a.p')
@@ -107,7 +107,7 @@ describe('image-path autocomplete async listing', () => {
     expect(mocks.read).toHaveBeenCalledTimes(1)
   })
 
-  it('shares initial failures, installs no watcher, and permits retry', async () => {
+  it('shares initial failures, installs no watcher, and permits retry', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const first = searchFilesAndDir('/pictures', '')
@@ -121,7 +121,7 @@ describe('image-path autocomplete async listing', () => {
     expect(mocks.read).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps readable results when watcher construction throws', async () => {
+  it('keeps readable results when watcher construction throws', async() => {
     vi.mocked(fs.watch).mockImplementation(() => {
       throw new Error('unwatchable')
     })
@@ -134,7 +134,7 @@ describe('image-path autocomplete async listing', () => {
 })
 
 describe('image-path autocomplete LRU ownership', () => {
-  it('caps watchers at 50 and evicts the least recently requested directory', async () => {
+  it('caps watchers at 50 and evicts the least recently requested directory', async() => {
     for (let i = 0; i < 50; i++) await searchFilesAndDir(`/dir-${i}`, '')
     await searchFilesAndDir('/dir-0', '')
     await searchFilesAndDir('/dir-50', '')
@@ -149,7 +149,7 @@ describe('image-path autocomplete LRU ownership', () => {
     expect(watchers.size).toBe(50)
   })
 
-  it('bounds cache entries even when no directory can be watched', async () => {
+  it('bounds cache entries even when no directory can be watched', async() => {
     vi.mocked(fs.watch).mockImplementation(() => {
       throw new Error('unwatchable')
     })
@@ -161,7 +161,7 @@ describe('image-path autocomplete LRU ownership', () => {
     expect(watchers.size).toBe(0)
   })
 
-  it('counts pending scans toward the bound and never watches an evicted initial result', async () => {
+  it('counts pending scans toward the bound and never watches an evicted initial result', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const oldRequest = searchFilesAndDir('/old', '')
@@ -175,7 +175,7 @@ describe('image-path autocomplete LRU ownership', () => {
     expect(mocks.read).toHaveBeenCalledTimes(52)
   })
 
-  it('does not let an evicted initial scan overwrite a newer scan of the same directory', async () => {
+  it('does not let an evicted initial scan overwrite a newer scan of the same directory', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const oldRequest = searchFilesAndDir('/old', '')
@@ -190,7 +190,7 @@ describe('image-path autocomplete LRU ownership', () => {
     expect(watchers.size).toBe(50)
   })
 
-  it('does not let a late initial rejection remove a newer directory state', async () => {
+  it('does not let a late initial rejection remove a newer directory state', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const oldRequest = searchFilesAndDir('/pictures', '')
@@ -206,7 +206,7 @@ describe('image-path autocomplete LRU ownership', () => {
 })
 
 describe('image-path autocomplete watcher refreshes', () => {
-  it('ignores change events, serializes rename bursts, and retains a follow-up refresh', async () => {
+  it('ignores change events, serializes rename bursts, and retains a follow-up refresh', async() => {
     await searchFilesAndDir('/pictures', '')
     const watcher = createdWatchers[0]
     watcher.notify('change')
@@ -228,7 +228,7 @@ describe('image-path autocomplete watcher refreshes', () => {
     expect(mocks.read).toHaveBeenCalledTimes(3)
   })
 
-  it('retains the cache after refresh failures and can refresh again', async () => {
+  it('retains the cache after refresh failures and can refresh again', async() => {
     await searchFilesAndDir('/pictures', '')
     mocks.read.mockRejectedValueOnce(new Error('refresh failed'))
     createdWatchers[0].notify('rename')
@@ -241,7 +241,7 @@ describe('image-path autocomplete watcher refreshes', () => {
     expect(await searchFilesAndDir('/pictures', '')).toEqual(result('new.png'))
   })
 
-  it('does not resurrect a refresh evicted while its read was pending', async () => {
+  it('does not resurrect a refresh evicted while its read was pending', async() => {
     await searchFilesAndDir('/old', '')
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
@@ -259,7 +259,7 @@ describe('image-path autocomplete watcher refreshes', () => {
     expect(mocks.read).toHaveBeenCalledTimes(53)
   })
 
-  it('does not promote background refreshes in request-based LRU order', async () => {
+  it('does not promote background refreshes in request-based LRU order', async() => {
     for (let i = 0; i < 50; i++) await searchFilesAndDir(`/dir-${i}`, '')
     createdWatchers[0].notify('rename')
     await settle()
@@ -268,7 +268,7 @@ describe('image-path autocomplete watcher refreshes', () => {
     expect(watchers.size).toBe(50)
   })
 
-  it('invalidates failed watchers and ignores their late callbacks after replacement', async () => {
+  it('invalidates failed watchers and ignores their late callbacks after replacement', async() => {
     await searchFilesAndDir('/pictures', '')
     const oldWatcher = createdWatchers[0]
     oldWatcher.emit('error', new Error('disconnected'))
@@ -286,7 +286,7 @@ describe('image-path autocomplete watcher refreshes', () => {
 })
 
 describe('closeAllWatchers', () => {
-  it('closes each watcher once, clears caches, and supports later fresh requests', async () => {
+  it('closes each watcher once, clears caches, and supports later fresh requests', async() => {
     await searchFilesAndDir('/one', '')
     await searchFilesAndDir('/two', '')
     closeAllWatchers()
@@ -298,7 +298,7 @@ describe('closeAllWatchers', () => {
     expect(watchers.size).toBe(1)
   })
 
-  it('does not install caches or watchers when pending initial requests finish after disposal', async () => {
+  it('does not install caches or watchers when pending initial requests finish after disposal', async() => {
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)
     const request = searchFilesAndDir('/pictures', '')
@@ -311,7 +311,7 @@ describe('closeAllWatchers', () => {
     expect(mocks.read).toHaveBeenCalledTimes(2)
   })
 
-  it('does not let a disposed refresh overwrite a replacement cache or schedule more reads', async () => {
+  it('does not let a disposed refresh overwrite a replacement cache or schedule more reads', async() => {
     await searchFilesAndDir('/pictures', '')
     const scan = deferred()
     mocks.read.mockReturnValueOnce(scan.promise)

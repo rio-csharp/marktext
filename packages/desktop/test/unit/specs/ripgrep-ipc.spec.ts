@@ -3,15 +3,15 @@ import { EventEmitter } from 'events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { handlers, listeners, spawn } = vi.hoisted(() => ({
-  handlers: new Map<string, (...args: any[]) => unknown>(),
-  listeners: new Map<string, (...args: any[]) => unknown>(),
+  handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  listeners: new Map<string, (...args: unknown[]) => unknown>(),
   spawn: vi.fn()
 }))
 vi.mock('electron', () => ({
   ipcMain: {
-    handle: (channel: string, handler: (...args: any[]) => unknown) =>
+    handle: (channel: string, handler: (...args: unknown[]) => unknown) =>
       handlers.set(channel, handler),
-    on: (channel: string, handler: (...args: any[]) => unknown) => listeners.set(channel, handler)
+    on: (channel: string, handler: (...args: unknown[]) => unknown) => listeners.set(channel, handler)
   }
 }))
 vi.mock('child_process', () => ({ spawn }))
@@ -25,6 +25,7 @@ class Sender extends EventEmitter {
   isDestroyed() {
     return this.destroyed
   }
+
   destroy() {
     this.destroyed = true
     this.emit('destroyed')
