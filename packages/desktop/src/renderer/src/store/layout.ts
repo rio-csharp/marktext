@@ -95,8 +95,7 @@ export const useLayoutStore = defineStore('layout', () => {
     if (layout.showTabBar !== undefined) showTabBar.value = !!layout.showTabBar
     if (layout.showOutlinePanel !== undefined) showOutlinePanel.value = !!layout.showOutlinePanel
     if (layout.sideBarWidth !== undefined) sideBarWidth.value = layout.sideBarWidth as number
-    if (layout.outlinePanelWidth !== undefined)
-      outlinePanelWidth.value = layout.outlinePanelWidth as number
+    if (layout.outlinePanelWidth !== undefined) { outlinePanelWidth.value = layout.outlinePanelWidth as number }
     if (scheduleBufferUpdate) {
       debouncedSendBufferedState()
     }

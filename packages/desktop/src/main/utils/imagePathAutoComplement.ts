@@ -62,7 +62,7 @@ const evictLeastRecentlyUsed = (): void => {
   }
 }
 
-const readDirectory = async (directory: string): Promise<DirOrImageEntry[]> => {
+const readDirectory = async(directory: string): Promise<DirOrImageEntry[]> => {
   const dirents = await fsPromises.readdir(directory, { withFileTypes: true })
   const entries: DirOrImageEntry[] = []
   for (const dirent of dirents) {
@@ -79,7 +79,7 @@ const readDirectory = async (directory: string): Promise<DirOrImageEntry[]> => {
   return entries
 }
 
-const rebuild = async (directory: string, state: DirectoryState): Promise<void> => {
+const rebuild = async(directory: string, state: DirectoryState): Promise<void> => {
   state.refreshRequested = true
   if (state.refreshing) return
   state.refreshing = true
@@ -128,7 +128,7 @@ const watchDirectory = (directory: string, state: DirectoryState): void => {
   }
 }
 
-export const searchFilesAndDir = async (
+export const searchFilesAndDir = async(
   directory: string,
   key: string
 ): Promise<DirOrImageEntry[]> => {

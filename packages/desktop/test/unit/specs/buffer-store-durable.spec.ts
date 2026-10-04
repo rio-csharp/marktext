@@ -22,13 +22,13 @@ function createStore(): Store {
   return store
 }
 
-afterEach(async () => {
+afterEach(async() => {
   await Promise.all(stores.splice(0).map((store) => store.flush()))
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
 describe('durable editor recovery buffers', () => {
-  it('writes JSON and leaves no temporary file behind', async () => {
+  it('writes JSON and leaves no temporary file behind', async() => {
     const store = createStore()
     const target = path.join(store.editorBufferStorePath, 'buffer.json')
     const state = { tabs: [{ id: '1', markdown: 'hello' }] }
@@ -37,7 +37,7 @@ describe('durable editor recovery buffers', () => {
     expect(readdirSync(store.editorBufferStorePath)).toEqual(['buffer.json'])
   })
 
-  it('serializes rapid writes and flushes the last accepted snapshot', async () => {
+  it('serializes rapid writes and flushes the last accepted snapshot', async() => {
     const store = createStore()
     const target = path.join(store.editorBufferStorePath, 'buffer.json')
     const writes = Array.from({ length: 20 }, (_, index) =>
@@ -49,7 +49,7 @@ describe('durable editor recovery buffers', () => {
     expect(readdirSync(store.editorBufferStorePath)).toEqual(['buffer.json'])
   })
 
-  it('captures the snapshot before the caller can mutate it', async () => {
+  it('captures the snapshot before the caller can mutate it', async() => {
     const store = createStore()
     const target = path.join(store.editorBufferStorePath, 'buffer.json')
     const state = { tabs: [{ markdown: 'unsaved' }] }
@@ -59,7 +59,7 @@ describe('durable editor recovery buffers', () => {
     expect(JSON.parse(readFileSync(target, 'utf8')).tabs[0].markdown).toBe('unsaved')
   })
 
-  it('waits for the pending unsaved snapshot before deciding whether to delete', async () => {
+  it('waits for the pending unsaved snapshot before deciding whether to delete', async() => {
     const store = createStore()
     const entry = store.getBufferStoreInfo('one')
     await store.writeBufferStoreFile(entry.filePath, { tabs: [{ isSaved: true }] })
@@ -75,7 +75,7 @@ describe('durable editor recovery buffers', () => {
     expect(store.getAll().one).toEqual(entry)
   })
 
-  it('does not delete a newer unsaved update arriving during cleanup', async () => {
+  it('does not delete a newer unsaved update arriving during cleanup', async() => {
     const store = createStore()
     const entry = store.getBufferStoreInfo('one')
     await store.writeBufferStoreFile(entry.filePath, { tabs: [{ isSaved: true }] })
@@ -88,7 +88,7 @@ describe('durable editor recovery buffers', () => {
     const barrier = new Promise<void>((resolve) => {
       release = resolve
     })
-    vi.spyOn(store, 'readBufferStoreFile').mockImplementationOnce(async (filePath: string) => {
+    vi.spyOn(store, 'readBufferStoreFile').mockImplementationOnce(async(filePath: string) => {
       const buffer = await originalRead(filePath)
       started()
       await barrier

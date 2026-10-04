@@ -1,5 +1,8 @@
 <template>
-  <div v-if="canNavigate" class="file-navigation">
+  <div
+    v-if="canNavigate"
+    class="file-navigation"
+  >
     <el-button
       circle
       title="Previous file"
@@ -8,7 +11,12 @@
     >
       <el-icon><ArrowUp /></el-icon>
     </el-button>
-    <el-button circle title="Next file" aria-label="Next file" @click="goToAdjacentFile(1)">
+    <el-button
+      circle
+      title="Next file"
+      aria-label="Next file"
+      @click="goToAdjacentFile(1)"
+    >
       <el-icon><ArrowDown /></el-icon>
     </el-button>
   </div>
@@ -40,8 +48,8 @@ const currentIndex = computed(() => {
   const pathname = currentFile.value?.pathname
   return pathname
     ? projectFiles.value.findIndex((file) =>
-        window.fileUtils.isSamePathSync(file.pathname, pathname)
-      )
+      window.fileUtils.isSamePathSync(file.pathname, pathname)
+    )
     : -1
 })
 const canNavigate = computed(() => projectFiles.value.length > 1 && currentIndex.value >= 0)
@@ -78,8 +86,7 @@ watch(
   () => currentFile.value?.pathname,
   (pathname) => {
     const pending = pendingCloseAfterOpen.value
-    if (!pending || !pathname || !window.fileUtils.isSamePathSync(pathname, pending.targetPathname))
-      return
+    if (!pending || !pathname || !window.fileUtils.isSamePathSync(pathname, pending.targetPathname)) { return }
     pendingCloseAfterOpen.value = null
     closePreviousIfSaved(pending.previous)
   }

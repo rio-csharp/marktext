@@ -54,7 +54,7 @@ interface WatcherEntry {
   close: () => void
 }
 
-const add = async (
+const add = async(
   send: SendEvent,
   pathname: string,
   type: WatchType,
@@ -133,7 +133,7 @@ const unlink = (send: SendEvent, pathname: string, type: WatchType): void => {
   })
 }
 
-const change = async (
+const change = async(
   send: SendEvent,
   pathname: string,
   type: WatchType,
@@ -263,11 +263,11 @@ class Watcher {
       // ~1s late (GH#3955).
       ...(type === 'file'
         ? {
-            awaitWriteFinish: {
-              stabilityThreshold: WATCHER_STABILITY_THRESHOLD,
-              pollInterval: WATCHER_STABILITY_POLL_INTERVAL
-            }
+          awaitWriteFinish: {
+            stabilityThreshold: WATCHER_STABILITY_THRESHOLD,
+            pollInterval: WATCHER_STABILITY_POLL_INTERVAL
           }
+        }
         : {}),
 
       usePolling
@@ -286,7 +286,7 @@ class Watcher {
       }
     }
 
-    const processEvent = async ({ event, pathname, stats }: TreeEvent): Promise<void> => {
+    const processEvent = async({ event, pathname, stats }: TreeEvent): Promise<void> => {
       if (disposed) return
       if (event === 'unlink') {
         unlink(send, pathname, type)
@@ -329,7 +329,7 @@ class Watcher {
     let drainingTreeEvents = false
     let replayTimer: NodeJS.Immediate | null = null
 
-    const drainTreeEvents = async (): Promise<void> => {
+    const drainTreeEvents = async(): Promise<void> => {
       replayTimer = null
       for (
         let count = 0;
@@ -403,7 +403,7 @@ class Watcher {
           if (renameTimer) {
             clearTimeout(renameTimer)
           }
-          renameTimer = setTimeout(async () => {
+          renameTimer = setTimeout(async() => {
             renameTimer = null
             if (disposed) {
               return

@@ -152,7 +152,7 @@ class AppMenu {
 
   private _writeRecents(): Promise<void> {
     if (this._recentWrite) return this._recentWrite
-    const write = async (): Promise<void> => {
+    const write = async(): Promise<void> => {
       await this._recentsReady
       while (this._persistedRecentRevision !== this._recentRevision) {
         const revision = this._recentRevision
@@ -600,7 +600,7 @@ class AppMenu {
       this.clearRecentlyUsedDocuments()
     })
 
-    onInternalChannel('broadcast-preferences-changed', async (prefs: Partial<IUserPreferences>) => {
+    onInternalChannel('broadcast-preferences-changed', async(prefs: Partial<IUserPreferences>) => {
       if (prefs.theme !== undefined || prefs.followSystemTheme !== undefined) {
         this.updateAppMenu()
       }
@@ -623,7 +623,7 @@ class AppMenu {
 const addRecentPath = (documents: string[], pathname: string): string[] =>
   [pathname, ...documents.filter((p) => p !== pathname)].slice(0, MAX_RECENTLY_USED_DOCUMENTS)
 
-const isRecentPath = async (pathname: string, allowDirectory = true): Promise<boolean> => {
+const isRecentPath = async(pathname: string, allowDirectory = true): Promise<boolean> => {
   try {
     let info = await fs.lstat(pathname)
     // Match isFile2/isDirectory2: one symlink hop, not recursive stat resolution.

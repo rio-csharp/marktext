@@ -132,7 +132,7 @@ class App {
       flushingQuit = true
       this._accessor.editorBufferStore
         .flush()
-        .then(async () => {
+        .then(async() => {
           try {
             await this._accessor.menu.flushRecentDocuments()
           } catch (error) {
@@ -654,11 +654,11 @@ class App {
       this._createEditorWindow()
     })
 
-    onInternalChannel('screen-capture', async (win: BrowserWindow) => {
+    onInternalChannel('screen-capture', async(win: BrowserWindow) => {
       if (isOsx) {
         // Use macOs `screencapture` command line when in macOs system.
         const screenshotFileName = await this.getScreenshotFileName()
-        exec('screencapture -i -c', async (err) => {
+        exec('screencapture -i -c', async(err) => {
           if (err) {
             log.error(err)
             return
@@ -775,7 +775,7 @@ class App {
       }
     })
 
-    ipcMain.on('mt::select-default-directory-to-open', async (e) => {
+    ipcMain.on('mt::select-default-directory-to-open', async(e) => {
       const { preferences } = this._accessor
       const { defaultDirectoryToOpen } = preferences.getAll()
       const win = BrowserWindow.fromWebContents(e.sender)
@@ -819,7 +819,7 @@ class App {
       return { defaultKeybindings, userKeybindings }
     })
 
-    ipcMain.handle('mt::keybinding-save-user-keybindings', async (_event, userKeybindings) => {
+    ipcMain.handle('mt::keybinding-save-user-keybindings', async(_event, userKeybindings) => {
       const { keybindings, menu } = this._accessor
       const editorWindows = this._windowManager
         .getWindowsByType(WindowType.EDITOR)
@@ -836,7 +836,7 @@ class App {
       return saved
     })
 
-    ipcMain.handle('mt::fs-trash-item', async (event, fullPath: string) => {
+    ipcMain.handle('mt::fs-trash-item', async(event, fullPath: string) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       return confirmAndTrashItem(win, fullPath)
     })

@@ -108,7 +108,7 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
 
   private async removeSavedBuffer(entry: BufferStoreEntry): Promise<void> {
     const revision = this.revisions.get(entry.filePath)
-    await this.enqueue(entry.filePath, async () => {
+    await this.enqueue(entry.filePath, async() => {
       if (this.writeErrors.has(entry.filePath)) return
       try {
         const buffer = await this.readBufferStoreFile(entry.filePath)
@@ -212,7 +212,7 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     // Capture before yielding: renderer snapshots can be mutated by their caller.
     const payload = JSON.stringify(newState)
     this.revisions.set(filePath, (this.revisions.get(filePath) ?? 0) + 1)
-    return this.enqueue(filePath, async () => {
+    return this.enqueue(filePath, async() => {
       try {
         // Atomic replacement alone is insufficient for unsaved recovery content (#3786).
         await writeFileAtomic(filePath, payload, { encoding: 'utf8', fsync: true })

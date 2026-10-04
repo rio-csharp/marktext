@@ -378,7 +378,7 @@ class WindowManager extends TypedEmitter<WindowManagerEvents> {
       editor.addToOpenedFiles(filePath)
     })
 
-    ipcMain.on('mt::close-window', async (e) => {
+    ipcMain.on('mt::close-window', async(e) => {
       const win = BrowserWindow.fromWebContents(e.sender)
       if (!win || this._closingWindows.has(win.id)) return
       const windowId = win.id

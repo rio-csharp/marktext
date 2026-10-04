@@ -271,7 +271,7 @@ export const useProjectStore = defineStore('project', () => {
       createCache.value = { dirname, type: String(type) }
       bus.emit('SIDEBAR::show-new-input')
     })
-    listenForSidebar('SIDEBAR::remove', async () => {
+    listenForSidebar('SIDEBAR::remove', async() => {
       const { pathname } = activeItem.value
       if (typeof pathname !== 'string' || !pathname) return
       try {
@@ -292,7 +292,7 @@ export const useProjectStore = defineStore('project', () => {
       const { pathname: src } = activeItem.value
       clipboard.value = { type: String(type), src }
     })
-    listenForSidebar('SIDEBAR::paste', async () => {
+    listenForSidebar('SIDEBAR::paste', async() => {
       const cb = clipboard.value
       const { pathname, isDirectory } = activeItem.value
       const dirname = isDirectory ? pathname : window.path.dirname(pathname)
