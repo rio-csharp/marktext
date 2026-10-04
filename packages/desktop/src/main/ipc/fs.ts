@@ -1,7 +1,6 @@
 import fs from 'fs-extra'
-import { statSync, constants, type Stats } from 'fs'
+import { constants, type Stats } from 'fs'
 import { ipcMain } from 'electron'
-import { isFile as commonIsFile, isDirectory as commonIsDirectory } from 'common/filesystem'
 
 interface SerializedStat {
   size: number
@@ -38,8 +37,20 @@ const toBuffer = (data: unknown): unknown => {
 }
 
 export const registerFsHandlers = (): void => {
-  ipcMain.handle('mt::fs::is-file', (_e, p: string) => commonIsFile(p))
-  ipcMain.handle('mt::fs::is-directory', (_e, p: string) => commonIsDirectory(p))
+  ipcMain.handle('mt::fs::is-file', async(_e, p: string) => {
+    try {
+      return (await fs.lstat(p)).isFile()
+    } catch {
+      return false
+    }
+  })
+  ipcMain.handle('mt::fs::is-directory', async(_e, p: string) => {
+    try {
+      return (await fs.lstat(p)).isDirectory()
+    } catch {
+      return false
+    }
+  })
   ipcMain.handle('mt::fs::empty-dir', (_e, p: string) => fs.emptyDir(p))
   ipcMain.handle('mt::fs::copy', (_e, src: string, dest: string) => fs.copy(src, dest))
   ipcMain.handle('mt::fs::ensure-dir', (_e, p: string) => fs.ensureDir(p))
@@ -62,9 +73,9 @@ export const registerFsHandlers = (): void => {
   ipcMain.handle('mt::fs::path-exists', (_e, p: string) => fs.pathExists(p))
   ipcMain.handle('mt::fs::unlink', (_e, p: string) => fs.unlink(p))
   ipcMain.handle('mt::fs::readdir', (_e, p: string) => fs.readdir(p))
-  ipcMain.handle('mt::fs::is-executable', (_e, p: string) => {
+  ipcMain.handle('mt::fs::is-executable', async(_e, p: string) => {
     try {
-      const stat = statSync(p)
+      const stat = await fs.stat(p)
       if (process.platform === 'win32') return stat.isFile()
       return (
         stat.isFile() &&

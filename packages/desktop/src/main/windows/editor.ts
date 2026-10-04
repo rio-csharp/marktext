@@ -11,7 +11,7 @@ import { TITLE_BAR_HEIGHT, editorWinOptions, isLinux, isOsx } from '../config'
 import { showEditorContextMenu } from '../contextMenu/editor'
 import { loadMarkdownFile } from '../filesystem/markdown'
 import { switchLanguage } from '../spellchecker'
-import fs from 'fs'
+import fsPromises from 'fs/promises'
 
 type RawMarkdownDocument = Awaited<ReturnType<typeof loadMarkdownFile>>
 
@@ -181,7 +181,9 @@ class EditorWindow extends BaseWindow {
       })
 
       if (this.bufferStoreInfo!.filePath) {
-        this._restoreAllState()
+        this._restoreAllState().catch((err) => {
+          log.error('Failed to restore editor state:', err)
+        })
       } else {
         this._doOpenFilesToOpen()
         this._markdownToOpen!.length = 0
@@ -556,7 +558,7 @@ class EditorWindow extends BaseWindow {
     this._filesToOpen!.length = 0
   }
 
-  private _restoreAllState(): void {
+  private async _restoreAllState(): Promise<void> {
     if (this.lifecycle !== WindowLifecycle.READY) {
       throw new Error('Invalid state.')
     }
@@ -565,7 +567,7 @@ class EditorWindow extends BaseWindow {
 
     try {
       const bufferState = JSON.parse(
-        fs.readFileSync(bufferStoreInfo!.filePath!, 'utf-8')
+        await fsPromises.readFile(bufferStoreInfo!.filePath!, 'utf-8')
       ) as RestoredBufferState
       if (!bufferState || !Array.isArray(bufferState.tabs)) {
         throw new Error('Invalid editor buffer state.')

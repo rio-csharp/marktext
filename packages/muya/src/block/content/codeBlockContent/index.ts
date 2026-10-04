@@ -79,6 +79,11 @@ const LANG_HASH = {
     'math-block': 'latex',
 };
 
+// Above this text length Prism re-highlighting on every keystroke costs more
+// than a frame, so highlight passes are coalesced onto a short timer.
+const HIGHLIGHT_DEFER_THRESHOLD = 5000;
+const HIGHLIGHT_DEFER_DELAY = 100;
+
 function hasStateMeta(
     state: CodeContentState,
 ): state is ICodeBlockState | IDiagramState | IFrontmatterState {
@@ -180,14 +185,24 @@ class CodeBlockContent extends Content {
             && /\S/.test(code)
             && loadedLanguages.has(fullLengthLang)
         ) {
-            const wrapper = document.createElement('div');
-            wrapper.classList.add(`language-${fullLengthLang}`);
-            wrapper.innerHTML = code;
-            prism.highlightElement(wrapper, false, function (this: HTMLElement) {
-                domNode.innerHTML = this.innerHTML;
-            });
+            if (text.length > HIGHLIGHT_DEFER_THRESHOLD) {
+                // Show the fresh text now (unhighlighted) and coalesce the
+                // Prism pass; continuous typing keeps deferring it.
+                domNode.innerHTML = code;
+                this._scheduleHighlight(code, fullLengthLang);
+            }
+            else {
+                this._cancelScheduledHighlight();
+                const wrapper = document.createElement('div');
+                wrapper.classList.add(`language-${fullLengthLang}`);
+                wrapper.innerHTML = code;
+                prism.highlightElement(wrapper, false, function (this: HTMLElement) {
+                    domNode.innerHTML = this.innerHTML;
+                });
+            }
         }
         else {
+            this._cancelScheduledHighlight();
             domNode.innerHTML = code;
         }
 
@@ -195,6 +210,39 @@ class CodeBlockContent extends Content {
         // Re-render the math/diagram/html preview too; undo/redo reaches this
         // block only through update(), not inputHandler (#1632).
         this._updatePreviewIfHave(text);
+    }
+
+    private _highlightTimer: ReturnType<typeof setTimeout> | null = null;
+
+    private _cancelScheduledHighlight() {
+        if (this._highlightTimer !== null) {
+            clearTimeout(this._highlightTimer);
+            this._highlightTimer = null;
+        }
+    }
+
+    private _scheduleHighlight(code: string, lang: string) {
+        this._cancelScheduledHighlight();
+        this._highlightTimer = setTimeout(() => {
+            this._highlightTimer = null;
+            const { domNode } = this;
+            // The block may have been detached (deleted, document swapped)
+            // while the timer was pending; `code` itself cannot be stale
+            // because every text change re-runs update(), which reschedules.
+            if (!domNode || !domNode.isConnected)
+                return;
+
+            const cursor = this.getCursor();
+            const wrapper = document.createElement('div');
+            wrapper.classList.add(`language-${lang}`);
+            wrapper.innerHTML = code;
+            prism.highlightElement(wrapper, false, function (this: HTMLElement) {
+                domNode.innerHTML = this.innerHTML;
+            });
+            // Rewriting innerHTML drops the caret if it lives in this block.
+            if (cursor)
+                this.setCursor(cursor.start.offset, cursor.end.offset, false);
+        }, HIGHLIGHT_DEFER_DELAY);
     }
 
     private _lastLineCount = -1;

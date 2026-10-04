@@ -27,6 +27,12 @@ function namespace(ns: string): Ilogger {
 namespace.level = (newLevel: TLevel) => {
     level = newLevel;
 };
+// Lets hot paths guard expensive arguments (e.g. JSON.stringify) that the
+// logger methods themselves would receive already evaluated.
+namespace.enabled = (method: TLevel) =>
+    levels.indexOf(method) <= levels.indexOf(level)
+    // eslint-disable-next-line node/prefer-global/process
+    && process.env.NODE_ENV !== 'production';
 debug.level = namespace.level;
 
 export default namespace;

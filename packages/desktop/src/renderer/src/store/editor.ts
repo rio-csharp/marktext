@@ -104,7 +104,6 @@ interface ContentChangePayload {
   muyaIndexCursor?: unknown
   history?: IFileState['history']
   toc?: TocItem[]
-  blocks?: unknown
 }
 
 interface AffiliationEntry {
@@ -145,6 +144,11 @@ export interface EditorState {
 }
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// Last-sent menu state snapshots for the every-caret-move IPC diffing in
+// SELECTION_CHANGE / SELECTION_FORMATS.
+let lastSelectionMenuStateJson = ''
+let lastFormatMenuStateJson = ''
 
 export const useEditorStore = defineStore('editor', {
   state: (): EditorState => ({
@@ -459,8 +463,7 @@ export const useEditorStore = defineStore('editor', {
         window.electron.ipcRenderer.send('mt::ask-for-image-auto-path', {
           pathname,
           src,
-          id,
-          currentFile: deepClone(this.currentFile)
+          id
         })
         return promise
       } else {
@@ -790,8 +793,7 @@ export const useEditorStore = defineStore('editor', {
         window.electron.ipcRenderer.send('mt::rename', {
           id,
           pathname,
-          newPathname,
-          currentFile: deepClone(this.currentFile)
+          newPathname
         })
       }
     },
@@ -1396,8 +1398,7 @@ export const useEditorStore = defineStore('editor', {
       cursor,
       muyaIndexCursor,
       history,
-      toc,
-      blocks
+      toc
     }: ContentChangePayload): void {
       const preferencesStore = usePreferencesStore()
       const { autoSave } = preferencesStore
@@ -1421,6 +1422,11 @@ export const useEditorStore = defineStore('editor', {
       tab.markdown = markdown
 
       if (oldMarkdown.length === 0 && markdown.length === 1 && markdown[0] === '\n') {
+        // A lone newline over an empty document is not meaningful content
+        // (trailing newlines are normalized away on save anyway) — keep the
+        // tab clean. Explicit because MARK_TAB_UNSAVED may already have
+        // flagged it on the cheap per-keystroke path.
+        tab.isSaved = true
         debouncedSendBufferedState()
         return
       }
@@ -1429,7 +1435,6 @@ export const useEditorStore = defineStore('editor', {
       if (cursor) tab.cursor = cursor
       if (muyaIndexCursor) tab.muyaIndexCursor = muyaIndexCursor
       if (history) tab.history = history
-      if (blocks) tab.blocks = blocks
 
       // Only update TOC if it's the current file
       if (id === this.currentFile?.id && toc && !equal(toc, this.listToc)) {
@@ -1517,10 +1522,16 @@ export const useEditorStore = defineStore('editor', {
       }
 
       const { windowId } = window.marktext?.env ?? { windowId: -1 }
+      const menuState = createApplicationMenuState(changes)
+      // Fires on every caret move; skip the IPC round-trip (and the main-side
+      // menu update it triggers) when the derived menu state didn't change.
+      const menuStateJson = JSON.stringify(menuState)
+      if (menuStateJson === lastSelectionMenuStateJson) return
+      lastSelectionMenuStateJson = menuStateJson
       window.electron.ipcRenderer.send(
         'mt::editor-selection-changed',
         windowId,
-        createApplicationMenuState(changes)
+        menuState
       )
     },
 
@@ -1539,12 +1550,38 @@ export const useEditorStore = defineStore('editor', {
       if (tab) tab.cursor = cursor
     },
 
+    // O(1) dirty flag raised on every engine mutation, ahead of the debounced
+    // content snapshot (LISTEN_FOR_CONTENT_CHANGE) that can later restore the
+    // clean state when the content hash matches the saved baseline again.
+    MARK_TAB_UNSAVED(id: string): void {
+      if (!id) return
+      const index = this.tabIdToIndex[id]
+      if (index == null) return
+      const tab = this.tabs[index]
+      if (tab && tab.isSaved) tab.isSaved = false
+    },
+
+    // Source-code-mode pendant of PERSIST_CURSOR: a pure caret move in
+    // CodeMirror must not drag the full markdown + word-count pipeline along.
+    PERSIST_MUYA_INDEX_CURSOR(id: string, cursor: unknown): void {
+      if (!id || !cursor) return
+      const index = this.tabIdToIndex[id]
+      if (index == null) return
+      const tab = this.tabs[index]
+      if (tab) tab.muyaIndexCursor = cursor
+    },
+
     SELECTION_FORMATS(formats: SelectionFormat[]): void {
       const { windowId } = window.marktext?.env ?? { windowId: -1 }
+      const formatState = createSelectionFormatState(formats)
+      // Same every-caret-move diffing as SELECTION_CHANGE.
+      const formatStateJson = JSON.stringify(formatState)
+      if (formatStateJson === lastFormatMenuStateJson) return
+      lastFormatMenuStateJson = formatStateJson
       window.electron.ipcRenderer.send(
         'mt::update-format-menu',
         windowId,
-        createSelectionFormatState(formats)
+        formatState
       )
     },
 

@@ -224,8 +224,9 @@ class Format extends Content {
         text: string,
         offset: number,
         type: Token['type'],
+        tokens?: Token[],
     ): Nullable<Token> {
-        const tokens = tokenizer(text, {
+        tokens ??= tokenizer(text, {
             hasBeginRules: false,
             options: this.muya.options,
         });
@@ -256,12 +257,12 @@ class Format extends Content {
         return result;
     }
 
-    private _checkNotSameToken(oldText: string, text: string) {
+    private _checkNotSameToken(oldText: string, text: string, oldTokens?: Token[], newTokens?: Token[]) {
         const { options } = this.muya;
-        const oldTokens = tokenizer(oldText, {
+        oldTokens ??= tokenizer(oldText, {
             options,
         });
-        const tokens = tokenizer(text, {
+        newTokens ??= tokenizer(text, {
             options,
         });
 
@@ -275,7 +276,7 @@ class Format extends Content {
                 oldCache[type] = 1;
         }
 
-        for (const { type } of tokens) {
+        for (const { type } of newTokens) {
             if (cache[type])
                 cache[type]++;
             else
@@ -294,7 +295,7 @@ class Format extends Content {
     }
 
     // TODO: @JOCS remove use this.selection directly
-    checkNeedRender(cursor: IRenderCursor = { anchor: this.selection.anchor ?? undefined, focus: this.selection.focus ?? undefined }) {
+    checkNeedRender(cursor: IRenderCursor = { anchor: this.selection.anchor ?? undefined, focus: this.selection.focus ?? undefined }, tokens?: Token[]) {
         const { labels } = this.inlineRenderer;
         const { text } = this;
         const { start: cStart, end: cEnd, anchor, focus } = cursor;
@@ -304,7 +305,7 @@ class Format extends Content {
             return false;
         const NO_NEED_TOKEN_REG = /text|hard_line_break|soft_line_break/;
 
-        for (const token of tokenizer(text, {
+        for (const token of tokens ?? tokenizer(text, {
             labels,
             options: this.muya.options,
         })) {
@@ -610,19 +611,28 @@ class Format extends Content {
 
         const { domNode } = this;
         const { start, end } = this.getCursor()!;
+        const { options } = this.muya;
         const textContent = getTextContent(domNode!, [
             CLASS_NAMES.MU_MATH_RENDER,
             CLASS_NAMES.MU_RUBY_RENDER,
         ]);
+        // The two cursor-in-token probes share one lexing of the incoming
+        // text; each used to re-lex it independently.
+        const textContentTokens = tokenizer(textContent, {
+            hasBeginRules: false,
+            options,
+        });
         const isInInlineMath = !!this._checkCursorInTokenType(
             textContent,
             start.offset,
             'inline_math',
+            textContentTokens,
         );
         const isInInlineCode = !!this._checkCursorInTokenType(
             textContent,
             start.offset,
             'inline_code',
+            textContentTokens,
         );
 
         let { needRender, text } = this.autoPair(
@@ -635,7 +645,15 @@ class Format extends Content {
             'format',
         );
 
-        if (this._checkNotSameToken(this.text, text))
+        // The render checks below all consume the same labels-aware token
+        // stream over the new text, so lex it once up front. The old text is
+        // lexed at most once — and not at all when autoPair left it unchanged
+        // (identical texts can't produce differing token counts).
+        const { labels } = this.inlineRenderer;
+        const newTokens = tokenizer(text, { labels, options });
+        const oldTokens = this.text === text ? newTokens : tokenizer(this.text, { labels, options });
+
+        if (this._checkNotSameToken(this.text, text, oldTokens, newTokens))
             needRender = true;
 
         const inputData = 'data' in event && typeof event.data === 'string' ? event.data : null;
@@ -653,7 +671,7 @@ class Format extends Content {
             },
         };
 
-        const checkMarkedUpdate = this.checkNeedRender(cursor);
+        const checkMarkedUpdate = this.checkNeedRender(cursor, newTokens);
 
         if (checkMarkedUpdate || needRender)
             this.update(cursor);
@@ -668,6 +686,7 @@ class Format extends Content {
                 this.text,
                 start.offset,
                 'emoji',
+                newTokens,
             );
             if (emojiToken && isEmojiToken(emojiToken)) {
                 const { content: emojiText } = emojiToken;

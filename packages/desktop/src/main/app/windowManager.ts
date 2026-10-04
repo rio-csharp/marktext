@@ -79,7 +79,7 @@ interface EditorBufferStoreLike {
   handleClose(
     restoreBufferId: string | undefined,
     windows: { id: number; win: BaseWindow }[]
-  ): void
+  ): Promise<void>
 }
 
 class WindowManager extends TypedEmitter<WindowManagerEvents> {
@@ -380,11 +380,14 @@ class WindowManager extends TypedEmitter<WindowManagerEvents> {
     // Force close a BrowserWindow
     ipcMain.on('mt::close-window', (e) => {
       const win = BrowserWindow.fromWebContents(e.sender)
-      // Before closing, update the buffer store if needed
+      // Before closing, update the buffer store if needed. Cleanup continues
+      // in the background; the window does not need to wait for it.
       this.editorBufferStore.handleClose(
         (win as unknown as { restoreBufferId?: string })?.restoreBufferId,
         this.getWindowsByType('editor')
-      )
+      ).catch((err) => {
+        log.error('Failed to clean up buffer store on window close:', err)
+      })
       this.forceClose(win)
     })
 

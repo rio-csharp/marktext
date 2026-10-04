@@ -208,6 +208,19 @@ class ParagraphContent extends Format {
         return this.parent;
     }
 
+    // A paragraph is the only block that can hold a reference definition, so
+    // its text transitions drive the label-cache invalidation.
+    override get text() {
+        return super.text;
+    }
+
+    override set text(text: string) {
+        const oldText = this.text;
+        super.text = text;
+        if (oldText !== text)
+            this.inlineRenderer.notifyDefinitionTransition(oldText, text);
+    }
+
     override update(cursor?: IRenderCursor, highlights = []) {
         this.inlineRenderer.patch(this, cursor, highlights);
         const { label } = this.inlineRenderer.getLabelInfo(this);

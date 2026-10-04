@@ -118,12 +118,10 @@ export class ScrollPage extends Parent {
     }
 
     updateRefLinkAndImage(label: string) {
-        const REG = new RegExp(`\\[${label}\\](?!:)`);
-
-        this.breadthFirstTraverse((node) => {
-            if (node.isContent() && REG.test(node.text))
-                node.update();
-        });
+        // Only blocks indexed as referencing this label need a re-render —
+        // previously this ran a full-tree BFS with a per-block regex test.
+        for (const block of this.muya.editor.inlineRenderer.getBlocksReferencingLabel(label))
+            block.update();
     }
 
     handleBlurFromContent(block: Content) {

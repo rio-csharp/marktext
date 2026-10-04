@@ -1,7 +1,7 @@
 import type { Doc, JSONOp, JSONOpList, Path } from 'ot-json1';
 import type { Muya } from '../muya';
 import type { TDiff } from '../utils';
-import type { TState } from './types';
+import type { TContainerState, TState } from './types';
 import * as json1 from 'ot-json1';
 import { deepClone } from '../utils';
 import logger from '../utils/logger';
@@ -23,6 +23,18 @@ export function asDoc(state: TState[] | TState): Doc {
 
 export function asState(doc: unknown): TState[] {
     return doc as TState[];
+}
+
+// ot-json1 components end in a payload object: `{e}`/`{es}` for text edits,
+// `{i}` for inserts, `{r}` for removes/replaces.
+function isTextEditComponent(component: unknown) {
+    const last = (component as unknown[])[(component as unknown[]).length - 1];
+
+    return (
+        typeof last === 'object'
+        && last !== null
+        && ('e' in last || 'es' in last)
+    );
 }
 
 class JSONState {
@@ -80,6 +92,10 @@ class JSONState {
             this._setState(content);
         else
             this._setMarkdown(content);
+
+        // Not present yet during the JSONState constructor (the Editor builds
+        // JSONState before InlineRenderer); the fresh cache starts dirty anyway.
+        this._muya.editor?.inlineRenderer?.invalidateLabels();
     }
 
     private _setState(state: TState[]) {
@@ -208,19 +224,36 @@ class JSONState {
     dispatch(op: JSONOp, source = 'user' /* user, api */) {
         const prevDoc = this.getState();
         this._apply(op);
-        // TODO: remove doc in future
-        const doc = this.getState();
-        debug.log(JSON.stringify(op));
-        this._muya.eventCenter.emit('json-change', {
-            op,
-            source,
-            prevDoc,
-            doc,
-        });
+        // JSON.stringify is eager, so gate it on the debug level instead of
+        // paying for it on every dispatched op in production.
+        if (logger.enabled('log'))
+            debug.log(JSON.stringify(op));
+        // Ops arriving here (undo/redo, api) mutate text without going through
+        // the Content text setter, so its label-cache invalidation never fires.
+        if (op !== null)
+            this._muya.editor?.inlineRenderer?.invalidateLabels();
+        this._emitJsonChange(op, source, prevDoc);
     }
 
     getState(): TState[] {
         return deepClone(this._state);
+    }
+
+    // Read-only traversal of the live state tree, skipping getState()'s
+    // defensive deepClone. `_state` is only ever replaced wholesale (ot-json1
+    // apply returns a fresh document), never mutated in place — so visitors
+    // must not mutate the states they receive.
+    traverseStates(visitor: (state: TState) => void) {
+        const walk = (states: TState[]) => {
+            for (const state of states) {
+                visitor(state);
+                const { children } = state as TContainerState;
+                if (Array.isArray(children) && children.length)
+                    walk(children);
+            }
+        };
+
+        walk(this._state);
     }
 
     getMarkdown() {
@@ -280,8 +313,6 @@ class JSONState {
         );
         const prevDoc = this.getState();
         this._apply(op);
-        // TODO: remove doc in future
-        const doc = this.getState();
         // Clear before emitting: a listener that edits synchronously then starts
         // a fresh batch instead of mutating the one being flushed.
         this._operationCache = [];
@@ -289,12 +320,26 @@ class JSONState {
         if (op === null)
             return;
 
-        this._muya.eventCenter.emit('json-change', {
-            op,
-            source: 'user',
-            prevDoc,
-            doc,
+        // Structural ops (insert/remove/replace whole blocks) can add or drop
+        // reference definitions without any text setter firing.
+        if (op.some(component => !isTextEditComponent(component)))
+            this._muya.editor?.inlineRenderer?.invalidateLabels();
+
+        this._emitJsonChange(op, 'user', prevDoc);
+    }
+
+    // `doc` is exposed through a lazy getter: history — the one json-change
+    // listener that is always subscribed — never reads the post-edit
+    // snapshot, so cloning the whole document up front twice per frame (once
+    // for `prevDoc`, once for `doc`) mostly fed the GC.
+    private _emitJsonChange(op: JSONOp, source: string, prevDoc: TState[]) {
+        let doc: TState[] | undefined;
+        const payload = { op, source, prevDoc };
+        Object.defineProperty(payload, 'doc', {
+            enumerable: true,
+            get: () => (doc ??= this.getState()),
         });
+        this._muya.eventCenter.emit('json-change', payload);
     }
 }
 

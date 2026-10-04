@@ -566,7 +566,13 @@ const syncEditorFormatMenus = (): void => {
 // WYSIWYG engine, so grey them out. On return to WYSIWYG, re-apply the menu
 // state for the CURRENT cursor context (a code block/table still disables some
 // items) rather than blanket-enabling everything (#3531).
-watch(sourceCode, () => {
+watch(sourceCode, (value) => {
+  if (value) {
+    // SourceCode mounts with `currentFile.markdown`; commit any deferred
+    // content snapshot first or it would open with up to one debounce window
+    // of edits missing.
+    flushActiveEditor()
+  }
   syncEditorFormatMenus()
 })
 
@@ -1675,8 +1681,67 @@ const blurEditor = () => {
   editor.value?.blur(false, true)
 }
 
+// Debounced derived-snapshot pipeline behind `json-change`. See the listener
+// registration for why this is deferred. `snapshotTabId` is captured at
+// schedule time so a snapshot is always committed against the tab whose edit
+// scheduled it, even if `currentFile` has since moved on.
+const CONTENT_SNAPSHOT_DELAY = 300
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null
+let snapshotTabId: string | null = null
+
+const commitContentSnapshot = (id: string): void => {
+  const muya = editor.value
+  if (!muya) return
+  // The engine document belongs to whatever tab is active NOW; if the tab was
+  // switched without a flush (shouldn't happen — UPDATE_CURRENT_FILE flushes),
+  // serializing it against the old id would corrupt that tab's state.
+  if (currentFile.value?.id !== id) return
+  const markdown = muya.getMarkdown()
+  // Stash the real engine history for in-session tab-switch restoration. The
+  // synthetic save-tracking id is derived from the live document content (a
+  // monotonic, never-reused id — see `syntheticHistory.ts`), NOT the engine
+  // undo-stack depth, which is reused and falsely showed a divergently
+  // re-edited tab as clean (Phase G — G6).
+  engineHistoryByTab.set(id, muya.getHistory())
+  editorStore.LISTEN_FOR_CONTENT_CHANGE({
+    id,
+    markdown,
+    wordCount: muyaWordCount(markdown),
+    cursor: serializeCursor(muya.getSelection()),
+    // Synthetic, desktop-shaped history so the store's save/dirty tracking
+    // keeps working (the engine history shape is incompatible).
+    history: makeSyntheticHistory(id, markdown),
+    toc: muya.getTOC()
+  })
+}
+
+const flushContentSnapshot = (): void => {
+  if (snapshotTimer !== null) {
+    clearTimeout(snapshotTimer)
+    snapshotTimer = null
+  }
+  const id = snapshotTabId
+  snapshotTabId = null
+  if (id) commitContentSnapshot(id)
+}
+
+const scheduleContentSnapshot = (id: string): void => {
+  snapshotTabId = id
+  if (snapshotTimer !== null) clearTimeout(snapshotTimer)
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null
+    const pendingId = snapshotTabId
+    snapshotTabId = null
+    if (pendingId) commitContentSnapshot(pendingId)
+  }, CONTENT_SNAPSHOT_DELAY)
+}
+
 const flushActiveEditor = () => {
+  // Drain the engine's rAF batch FIRST (fires a synchronous `json-change`,
+  // scheduling a snapshot for any still-queued edit), then commit the pending
+  // snapshot synchronously so readers of `tab.markdown` see fresh content.
   editor.value?.flush()
+  flushContentSnapshot()
 }
 
 const focusEditor = () => {
@@ -1909,35 +1974,21 @@ onMounted(() => {
   bus.on('replace-misspelling', replaceMisspelling)
 
   // The engine emits a low-level `json-change` ({ op, source, prevDoc, doc })
-  // on every document mutation; the desktop's content-change pipeline wants the
-  // derived document snapshot (markdown / word count / cursor / history / TOC /
-  // block AST), so we compute it here — mirroring the legacy engine's
-  // `dispatchChange` payload.
+  // on EVERY document mutation (~per keystroke). The desktop's content-change
+  // pipeline wants the derived document snapshot (markdown / word count /
+  // cursor / history / TOC), which is O(document size) to compute — doing it
+  // inline made typing sluggish on large documents. Per mutation we only flag
+  // the tab dirty (O(1)) and defer the snapshot until typing pauses; any
+  // consumer of `tab.markdown` (save, tab switch, move/rename) force-flushes
+  // the pending snapshot first via `flush-active-editor`.
   editor.value.on('json-change', () => {
     // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
     // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
     if (!currentFile.value || !editor.value) return
     const { id } = currentFile.value
     if (!id) return
-    const markdown = editor.value.getMarkdown()
-    // Stash the real engine history for in-session tab-switch restoration. The
-    // synthetic save-tracking id is derived from the live document content (a
-    // monotonic, never-reused id — see `syntheticHistory.ts`), NOT the engine
-    // undo-stack depth, which is reused and falsely showed a divergently
-    // re-edited tab as clean (Phase G — G6).
-    const engineHistory = editor.value.getHistory()
-    engineHistoryByTab.set(id, engineHistory)
-    editorStore.LISTEN_FOR_CONTENT_CHANGE({
-      id,
-      markdown,
-      wordCount: muyaWordCount(markdown),
-      cursor: serializeCursor(editor.value.getSelection()),
-      // Synthetic, desktop-shaped history so the store's save/dirty tracking
-      // keeps working (the engine history shape is incompatible).
-      history: makeSyntheticHistory(id, markdown),
-      toc: editor.value.getTOC(),
-      blocks: editor.value.getState()
-    })
+    editorStore.MARK_TAB_UNSAVED(id)
+    scheduleContentSnapshot(id)
   })
 
   // The engine does not emit `scroll`; listen on the scroll container directly
@@ -2018,7 +2069,10 @@ onMounted(() => {
       }
     }
 
-    selectionChange.value = changes
+    // `changes` carries LIVE engine block instances (anchorBlock/focusBlock);
+    // markRaw keeps Vue from wrapping that object graph in a reactive Proxy —
+    // the same reason the Muya instance itself is markRaw'd at mount.
+    selectionChange.value = markRaw(changes)
     // Persist the caret so a click/arrow-key move (which never fires
     // `json-change`) survives an in-session tab switch — `tab.cursor` is what
     // `handleFileChange` replays on re-activation. Cheap: serialized caret only.
@@ -2067,6 +2121,14 @@ onBeforeUnmount(() => {
   bus.off('open-command-spellchecker-switch-language', openSpellcheckerLanguageCommand)
   bus.off('replace-misspelling', replaceMisspelling)
   bus.off('language-changed', handleLanguageChanged)
+
+  // Commit any deferred content snapshot so a pending edit isn't lost when
+  // the editor unmounts (e.g. source-code mode takes over).
+  if (snapshotTimer !== null) {
+    clearTimeout(snapshotTimer)
+    snapshotTimer = null
+  }
+  snapshotTabId = null
 
   document.removeEventListener('keyup', keyup)
 

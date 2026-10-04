@@ -60,7 +60,12 @@ const startSearch = ({ mode, directories, pattern, options }: StartArgs): Cancel
       const env = payload as RipgrepPayloadEnvelope | null
       if (!env || env.searchId !== searchId) return
       try {
-        didMatch(env.payload)
+        // The main process batches matches to cut IPC traffic; a payload may
+        // be a single match or an array of them.
+        const items = Array.isArray(env.payload) ? env.payload : [env.payload]
+        for (const item of items) {
+          didMatch(item)
+        }
       } catch (err) {
         console.error(err)
       }

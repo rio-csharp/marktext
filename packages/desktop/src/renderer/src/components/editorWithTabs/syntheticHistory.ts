@@ -39,25 +39,27 @@
 const stripTrailingNewlines = (content: string): string =>
   content.replace(/[\r\n]+$/, '')
 
-// A fast, stable 64-bit string hash (FNV-1a) over the trailing-newline-normalized
-// content. Used so the content -> id map stores short keys instead of whole
-// documents; a collision would map two genuinely different documents to the same
-// id and could reintroduce the false-clean it guards against. 64 bits keeps the
-// collision probability negligible even for a long editing session with many
-// thousands of distinct snapshots (a 32-bit hash hits ~50% collision odds near
-// ~77k snapshots via the birthday bound — realistic over a long session — so the
-// extra width is worth the BigInt key).
-const FNV64_OFFSET = 0xcbf29ce484222325n
-const FNV64_PRIME = 0x100000001b3n
-const MASK64 = 0xffffffffffffffffn
-const hashContent = (content: string): bigint => {
+// A fast, stable 53-bit string hash (cyrb53) over the trailing-newline-
+// normalized content. Used so the content -> id map stores short keys instead
+// of whole documents; a collision would map two genuinely different documents
+// to the same id and could reintroduce the false-clean it guards against.
+// 53 bits keeps the collision probability negligible for a long editing
+// session (birthday bound ~50% only near millions of distinct snapshots,
+// versus ~77k for 32-bit). Number + Math.imul arithmetic is an order of
+// magnitude cheaper than the previous 64-bit BigInt FNV-1a, which ran one
+// BigInt multiply per character of the document on every snapshot.
+const hashContent = (content: string): number => {
   const normalized = stripTrailingNewlines(content)
-  let hash = FNV64_OFFSET
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
   for (let i = 0; i < normalized.length; i++) {
-    hash ^= BigInt(normalized.charCodeAt(i))
-    hash = (hash * FNV64_PRIME) & MASK64
+    const ch = normalized.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
   }
-  return hash
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0)
 }
 
 export interface IFileHistoryLike {
@@ -73,7 +75,7 @@ export interface IFileHistoryLike {
 // store's seeded `lastSavedHistoryId: 0` for a freshly loaded/clean document.
 export class SyntheticHistory {
   private counter = 0
-  private readonly idByContent = new Map<bigint, number>()
+  private readonly idByContent = new Map<number, number>()
 
   constructor(baselineContent: string = '') {
     // The freshly-loaded document is its own clean baseline; the store seeds

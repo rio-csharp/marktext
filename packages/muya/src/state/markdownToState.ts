@@ -32,11 +32,10 @@ const DEFAULT_OPTIONS = {
     frontMatter: true,
 };
 
-// Token types whose handler manipulates the `parentList` stack (push a
-// container and recurse via synthetic `block-end`), as opposed to the leaf
-// tokens that only append a state to the current level.
+// Token types whose handler pushes a container onto the `parentList` stack
+// and recurses into its child tokens, as opposed to the leaf tokens that
+// only append a state to the current level.
 const CONTAINER_TOKEN_TYPES = new Set([
-    'block-end',
     'blockquote',
     'list',
     'list_item',
@@ -59,9 +58,6 @@ export class MarkdownToState {
             frontMatter = true,
         } = this._options;
 
-        // markdownToState injects synthetic `block-end` markers (see the
-        // blockquote/list/list_item/footnote cases below) to pop the parent
-        // stack, so the working stream is wider than what `lexBlock` returns.
         const tokens: TBlockToken[] = lexBlock(markdown, {
             footnote,
             math,
@@ -70,46 +66,66 @@ export class MarkdownToState {
         });
 
         const states: TState[] = [];
-        let token: TBlockToken | undefined;
         const parentList: TState[][] = [states];
 
-        // eslint-disable-next-line no-cond-assign
-        while ((token = tokens.shift())) {
-            if (CONTAINER_TOKEN_TYPES.has(token.type))
-                this._handleContainerToken(token, parentList, tokens);
-            else
-                this._handleLeafToken(token, parentList, tokens, trimUnnecessaryCodeBlockEmptyLines);
-        }
+        this._consumeTokens(tokens, parentList, trimUnnecessaryCodeBlockEmptyLines);
 
         return states.length ? states : [{ name: 'paragraph', text: '' }];
+    }
+
+    // Cursor-based traversal (`i` only ever advances) — the previous
+    // shift/unshift stream made every container nesting O(n) array copies.
+    private _consumeTokens(
+        tokens: TBlockToken[],
+        parentList: TState[][],
+        trimUnnecessaryCodeBlockEmptyLines: boolean,
+    ) {
+        for (let i = 0; i < tokens.length; i++) {
+            const token = tokens[i];
+
+            if (token.type === 'text') {
+                // Adjacent `text` tokens are soft-wrapped lines of one
+                // paragraph; merge them through the cursor.
+                let value = token.text;
+                while (tokens[i + 1]?.type === 'text')
+                    value += `\n${(tokens[++i] as Extract<TBlockToken, { type: 'text' }>).text}`;
+
+                parentList[0].push({ name: 'paragraph', text: value });
+                continue;
+            }
+
+            if (CONTAINER_TOKEN_TYPES.has(token.type))
+                this._handleContainerToken(token, parentList, trimUnnecessaryCodeBlockEmptyLines);
+            else
+                this._handleLeafToken(token, parentList, trimUnnecessaryCodeBlockEmptyLines);
+        }
+    }
+
+    // Pops the container `children` array the caller pushed for `tokenType`,
+    // preserving the old synthetic `block-end` sentinel semantics: an emptied
+    // blockquote / list item still yields one empty paragraph (fix #1735, e.g.
+    // `>` followed by `bar`).
+    private _closeContainer(
+        tokenType: 'blockquote' | 'list' | 'list-item' | 'footnote',
+        children: TState[],
+        parentList: TState[][],
+    ) {
+        if (
+            children.length === 0
+            && (tokenType === 'blockquote' || tokenType === 'list-item')
+        ) {
+            children.push({ name: 'paragraph', text: '' });
+        }
+        parentList.shift();
     }
 
     private _handleContainerToken(
         token: TBlockToken,
         parentList: TState[][],
-        tokens: TBlockToken[],
+        trimUnnecessaryCodeBlockEmptyLines: boolean,
     ) {
         let state: TState;
         switch (token.type) {
-            // Marks the end of the children's traversal and a return to the previous level
-            case 'block-end': {
-                // Fix #1735 the blockquote maybe empty. like bellow:
-                // >
-                // bar
-                if (
-                    parentList[0].length === 0
-                    && (token.tokenType === 'blockquote' || token.tokenType === 'list-item')
-                ) {
-                    state = {
-                        name: 'paragraph' as const,
-                        text: '',
-                    };
-                    parentList[0].push(state);
-                }
-                parentList.shift();
-                break;
-            }
-
             case 'blockquote': {
                 state = {
                     name: 'block-quote' as const,
@@ -117,8 +133,8 @@ export class MarkdownToState {
                 };
                 parentList[0].push(state);
                 parentList.unshift(state.children);
-                tokens.unshift({ type: 'block-end', tokenType: 'blockquote' });
-                tokens.unshift(...(token.tokens as TBlockToken[]));
+                this._consumeTokens(token.tokens as TBlockToken[], parentList, trimUnnecessaryCodeBlockEmptyLines);
+                this._closeContainer('blockquote', state.children, parentList);
                 break;
             }
 
@@ -163,8 +179,8 @@ export class MarkdownToState {
                 state = listState;
                 parentList[0].push(state);
                 parentList.unshift(state.children);
-                tokens.unshift({ type: 'block-end', tokenType: 'list' });
-                tokens.unshift(...(token.items as TBlockToken[]));
+                this._consumeTokens(token.items as TBlockToken[], parentList, trimUnnecessaryCodeBlockEmptyLines);
+                this._closeContainer('list', state.children, parentList);
                 break;
             }
 
@@ -188,8 +204,8 @@ export class MarkdownToState {
                 state = itemState;
                 parentList[0].push(state);
                 parentList.unshift(state.children);
-                tokens.unshift({ type: 'block-end', tokenType: 'list-item' });
-                tokens.unshift(...(token.tokens as TBlockToken[]));
+                this._consumeTokens(token.tokens as TBlockToken[], parentList, trimUnnecessaryCodeBlockEmptyLines);
+                this._closeContainer('list-item', state.children, parentList);
                 break;
             }
 
@@ -197,7 +213,7 @@ export class MarkdownToState {
                 // The footnote extension (utils/marked/extensions/footnote.ts)
                 // emits a parent token whose `tokens` array holds nested
                 // block tokens. Mirror that into a `footnote` container
-                // state and recurse via tokens.unshift / block-end.
+                // state and recurse into the child tokens.
                 const { identifier } = token;
                 state = {
                     name: 'footnote' as const,
@@ -206,8 +222,8 @@ export class MarkdownToState {
                 };
                 parentList[0].push(state);
                 parentList.unshift(state.children);
-                tokens.unshift({ type: 'block-end', tokenType: 'footnote' });
-                tokens.unshift(...(token.tokens as TBlockToken[]));
+                this._consumeTokens(token.tokens as TBlockToken[], parentList, trimUnnecessaryCodeBlockEmptyLines);
+                this._closeContainer('footnote', state.children, parentList);
                 break;
             }
         }
@@ -216,7 +232,6 @@ export class MarkdownToState {
     private _handleLeafToken(
         token: TBlockToken,
         parentList: TState[][],
-        tokens: TBlockToken[],
         trimUnnecessaryCodeBlockEmptyLines: boolean,
     ) {
         let state: TState;
@@ -353,20 +368,6 @@ export class MarkdownToState {
                     name: 'math-block' as const,
                     text,
                     meta: { mathStyle },
-                };
-                parentList[0].push(state);
-                break;
-            }
-
-            case 'text': {
-                value = token.text;
-                while (tokens[0]?.type === 'text') {
-                    const next = tokens.shift() as Extract<TBlockToken, { type: 'text' }>;
-                    value += `\n${next.text}`;
-                }
-                state = {
-                    name: 'paragraph',
-                    text: value,
                 };
                 parentList[0].push(state);
                 break;

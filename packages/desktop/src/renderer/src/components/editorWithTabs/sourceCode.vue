@@ -302,9 +302,43 @@ const saveContent = (cm: CMInstance) => {
   }
 }
 
-const listenChange = () => {
-  editor.value.on('cursorActivity', (cm: CMInstance) => {
+// saveContent serializes the WHOLE document (cm.getValue()) plus a full word
+// count, so it must not run per keystroke — debounce to typing pauses. Tab
+// switch (prepareTabSwitch) and unmount commit synchronously regardless.
+const CONTENT_COMMIT_DELAY = 300
+const scheduleSaveContent = (cm: CMInstance) => {
+  if (readOnly.value) return
+  if (tabId.value) editorStore.MARK_TAB_UNSAVED(tabId.value)
+  if (commitTimer.value) clearTimeout(commitTimer.value)
+  commitTimer.value = setTimeout(() => {
+    commitTimer.value = null
     saveContent(cm)
+  }, CONTENT_COMMIT_DELAY)
+}
+
+// Pure caret moves (click / arrow keys) only persist the cursor — no
+// getValue(), no word count, no dirty bookkeeping.
+const persistCursorOnly = (cm: CMInstance) => {
+  if (readOnly.value || !tabId.value) return
+  let focus = cm.getCursor('head')
+  let anchor = cm.getCursor('anchor')
+  if (anchor && focus && anchor.line > focus.line) {
+    const tmpCursor = focus
+    focus = anchor
+    anchor = tmpCursor
+  }
+  editorStore.PERSIST_MUYA_INDEX_CURSOR(tabId.value, { focus, anchor })
+}
+
+const listenChange = () => {
+  // `changes` = actual text edits (batched per operation); `cursorActivity`
+  // fires for those AND for plain caret moves, so the heavy commit must hang
+  // off `changes` only.
+  editor.value.on('changes', (cm: CMInstance) => {
+    scheduleSaveContent(cm)
+  })
+  editor.value.on('cursorActivity', (cm: CMInstance) => {
+    persistCursorOnly(cm)
   })
 }
 
@@ -317,9 +351,8 @@ const handleScrollToHeader = (slug: unknown) => {
   if (index < 0) return
   const line = findMarkdownHeadingLine(editor.value.getValue(), index)
   if (line < 0) return
-  // `.source-code` is the scroll container (CodeMirror renders full-height with
-  // viewportMargin: Infinity, so its own scroller never scrolls).
-  scrollSourceEditorToLine(editor.value, line, sourceCodeContainer.value)
+  // CodeMirror's own scroller is the scroll container (virtualized viewport).
+  scrollSourceEditorToLine(editor.value, line, editor.value.getScrollerElement?.())
 }
 
 watch(readOnly, (value) => {
@@ -346,7 +379,10 @@ onMounted(() => {
     styleActiveLine: true,
     readOnly: readOnly.value,
     direction: textDirection,
-    viewportMargin: Infinity,
+    // Default viewportMargin (10): CodeMirror virtualizes off-screen lines.
+    // `viewportMargin: Infinity` used to render the entire document to let the
+    // OUTER container scroll, which froze the UI on large files; scrolling now
+    // happens in CodeMirror's own scroller (see the stylesheet below).
     lineNumberFormatter (line: number) {
       if (line % 10 === 0 || line === 1) {
         return line
@@ -427,10 +463,14 @@ onBeforeUnmount(() => {
 .source-code {
   height: calc(100vh - var(--titleBarHeight));
   box-sizing: border-box;
-  overflow: auto;
+  /* CodeMirror scrolls internally (virtualized viewport); the outer container
+     must not scroll or the two scroll offsets fight each other. */
+  overflow: hidden;
 }
 .source-code .CodeMirror {
-  height: auto;
+  /* Fixed height so CodeMirror's own scroller takes over — `height: auto`
+     would render every line of the document into the DOM. */
+  height: calc(100% - 100px);
   margin: 50px auto;
   max-width: var(--editorAreaWidth);
   background: transparent;

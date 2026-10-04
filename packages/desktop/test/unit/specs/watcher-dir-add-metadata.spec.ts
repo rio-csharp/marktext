@@ -83,6 +83,9 @@ describe('watcher directory add sends metadata only (A)', () => {
     // NOTE: the watcher invokes `add()` as a floating promise, so wait for
     // the IPC send to land instead of only awaiting the event handler.
     await handlerStores[0]['add']!(mdFile as never)
+    // Initial-replay events are buffered until chokidar's 'ready', then
+    // drained in chunks; the fake watcher must fire it explicitly.
+    handlerStores[0]['ready']?.()
     await vi.waitFor(() => expect(win.webContents.send).toHaveBeenCalledTimes(1))
 
     expect(loadMarkdownFile).not.toHaveBeenCalled()

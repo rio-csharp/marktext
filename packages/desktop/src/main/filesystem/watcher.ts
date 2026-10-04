@@ -50,6 +50,7 @@ interface WatcherEntry {
 }
 
 const add = async(
+  send: (payload: unknown) => void,
   win: BrowserWindow,
   pathname: string,
   type: WatchType,
@@ -109,7 +110,7 @@ const add = async(
         return
       }
     }
-    win.webContents.send(EVENT_NAME[type], {
+    send({
       type: 'add',
       change: file
     })
@@ -171,7 +172,7 @@ const change = async(
   }
 }
 
-const addDir = (win: BrowserWindow, pathname: string, type: WatchType): void => {
+const addDir = (send: (payload: unknown) => void, pathname: string, type: WatchType): void => {
   if (type === 'file') return
 
   const directory = {
@@ -185,7 +186,7 @@ const addDir = (win: BrowserWindow, pathname: string, type: WatchType): void => 
     files: []
   }
 
-  win.webContents.send('mt::update-object-tree', {
+  send({
     type: 'addDir',
     change: directory
   })
@@ -269,6 +270,62 @@ class Watcher {
     let enospcReached = false
     let renameTimer: NodeJS.Timeout | null = null
 
+    // Buffer the directory watcher's initial replay: chokidar emits one
+    // add/addDir per existing file at startup, and forwarding each as its own
+    // IPC message floods the renderer on large trees. Events accumulate until
+    // 'ready', then drain over the unchanged channel in chunks so both the
+    // main event loop and the renderer get breathing room between batches.
+    const initialTreeEvents: unknown[] = []
+    let initialScanDone = type === 'file'
+    let drainingInitialEvents = false
+
+    const drainInitialTreeEvents = (): void => {
+      if (drainingInitialEvents) return
+      drainingInitialEvents = true
+      const drainChunk = (): void => {
+        if (disposed) {
+          initialTreeEvents.length = 0
+          return
+        }
+        const chunk = initialTreeEvents.splice(0, 500)
+        try {
+          for (const payload of chunk) {
+            win.webContents.send(EVENT_NAME.dir, payload)
+          }
+        } catch {
+          // Window destroyed mid-drain; drop the rest of the replay.
+          initialTreeEvents.length = 0
+        }
+        if (initialTreeEvents.length > 0) {
+          setImmediate(drainChunk)
+        } else {
+          initialScanDone = true
+          drainingInitialEvents = false
+        }
+      }
+      setImmediate(drainChunk)
+    }
+
+    const sendTreeEvent = (payload: unknown): void => {
+      if (initialScanDone) {
+        win.webContents.send(EVENT_NAME.dir, payload)
+      } else {
+        initialTreeEvents.push(payload)
+      }
+    }
+
+    const sendAddEvent = (payload: unknown): void => {
+      if (type === 'dir') {
+        sendTreeEvent(payload)
+      } else {
+        win.webContents.send(EVENT_NAME.file, payload)
+      }
+    }
+
+    if (type === 'dir') {
+      watcher.on('ready', drainInitialTreeEvents)
+    }
+
     watcher
       .on('add', async(pathname: string) => {
         if (!(await this._shouldIgnoreEvent(win.id, pathname, type, usePolling))) {
@@ -280,6 +337,7 @@ class Watcher {
             autoNormalizeLineEndings = false
           } = _preferences.getAll()
           add(
+            sendAddEvent,
             win,
             pathname,
             type,
@@ -311,7 +369,7 @@ class Watcher {
         }
       })
       .on('unlink', (pathname: string) => unlink(win, pathname, type))
-      .on('addDir', (pathname: string) => addDir(win, pathname, type))
+      .on('addDir', (pathname: string) => addDir(sendTreeEvent, pathname, type))
       .on('unlinkDir', (pathname: string) => unlinkDir(win, pathname, type))
       .on('raw', (event: string, subpath: string, details: unknown) => {
         if (
@@ -360,6 +418,7 @@ class Watcher {
 
     const closeFn = (): void => {
       disposed = true
+      initialTreeEvents.length = 0
       if (this.watchers[id]) {
         delete this.watchers[id]
       }

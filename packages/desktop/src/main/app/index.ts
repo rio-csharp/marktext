@@ -15,7 +15,7 @@ import { registerKeyboardListeners } from '../keyboard'
 import { selectTheme } from '../menu/actions/theme'
 import { dockMenu } from '../menu/templates'
 import registerSpellcheckerListeners from '../spellchecker'
-import { watchers } from '../utils/imagePathAutoComplement'
+import { closeAllWatchers } from '../utils/imagePathAutoComplement'
 import { onInternalChannel } from '../utils/internalIpc'
 import { WindowType } from '../windows/base'
 import EditorWindow from '../windows/editor'
@@ -110,10 +110,8 @@ class App {
     app.on('ready', this.ready)
 
     app.on('window-all-closed', () => {
-      // Close all the image path watcher
-      for (const watcher of watchers.values()) {
-        watcher.close()
-      }
+      // Close all the image path watchers and drop the cached listings.
+      closeAllWatchers()
       this._windowManager.closeWatcher()
       if (!isOsx) {
         app.quit()
@@ -406,7 +404,9 @@ class App {
         })
       } else if (_openFilesCache.length) {
         // We should wipe the buffer store if not it will keep creating new windows whenever we open files via double click in the file manager
-        editorBufferStore.clearBufferStoresWithAllSaved()
+        editorBufferStore.clearBufferStoresWithAllSaved().catch((err) => {
+          log.error('Failed to clear saved buffer stores:', err)
+        })
         this._openFilesToOpen()
       } else {
         this._createEditorWindow()

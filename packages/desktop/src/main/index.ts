@@ -38,7 +38,9 @@ const initializeLogger = (env: AppEnvironment): void => {
     return path.join(env.paths.logPath, 'main.log')
   }
   log.transports.file.level = getLogLevel()
-  log.transports.file.sync = true
+  // Async file writes: with sync=true every log line blocked the main process
+  // event loop on disk I/O.
+  log.transports.file.sync = false
   log.errorHandler.startCatching({
     onError(error: unknown) {
       // This callback receives the full Error object with stack

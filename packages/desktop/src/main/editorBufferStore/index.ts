@@ -1,4 +1,5 @@
 import fs from 'fs'
+import fsPromises from 'fs/promises'
 import path from 'path'
 import writeFileAtomic from 'write-file-atomic'
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
@@ -27,6 +28,11 @@ interface EditorWindow {
 // No instance-level events emitted; kept as TypedEmitter for parity with the
 // other main classes.
 type EditorBufferStoreEvents = Record<string, unknown[]>
+
+// Serializes writes per buffer file: rapid renderer state updates are each
+// persisted in full, and concurrent atomic writes could otherwise complete out
+// of order and leave an older snapshot on disk.
+const writeQueues = new Map<string, Promise<void>>()
 
 class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
   editorBufferStorePath: string
@@ -68,27 +74,31 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return this.bufferStores
   }
 
-  clearBufferStoresWithAllSaved(): void {
+  async clearBufferStoresWithAllSaved(): Promise<void> {
     this.bufferStores = this.getAllBufferStores()
 
-    for (const id in this.bufferStores) {
-      try {
-        const buffer = this.readBufferStoreFile(this.bufferStores[id].filePath)
-        const allSaved = buffer.tabs.every((file) => file.isSaved)
-        if (buffer.tabs.length === 0 || allSaved) {
-          try {
-            fs.unlinkSync(this.bufferStores[id].filePath)
-          } catch (e) {
-            console.error('Failed to delete buffer store file during clear', e)
+    // Reads run in parallel: with N stale crash-recovery buffers, N sequential
+    // sync reads would each stall the main process event loop.
+    await Promise.all(
+      Object.values(this.bufferStores).map(async(entry) => {
+        try {
+          const buffer = await this.readBufferStoreFile(entry.filePath)
+          const allSaved = buffer.tabs.every((file) => file.isSaved)
+          if (buffer.tabs.length === 0 || allSaved) {
+            try {
+              await fsPromises.unlink(entry.filePath)
+            } catch (e) {
+              console.error('Failed to delete buffer store file during clear', e)
+            }
           }
+        } catch (e) {
+          console.error('Failed to read buffer store file during clear', e)
         }
-      } catch (e) {
-        console.error('Failed to read buffer store file during clear', e)
-      }
-    }
+      })
+    )
   }
 
-  handleClose(restoreBufferId: string | undefined, editorWindows: EditorWindow[]): void {
+  async handleClose(restoreBufferId: string | undefined, editorWindows: EditorWindow[]): Promise<void> {
     // If > 1 window is present, and the window being closed has all files
     // saved, we can delete its saved buffer.
 
@@ -111,10 +121,10 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
         return
       }
       try {
-        const buffer = this.readBufferStoreFile(this.bufferStores[restoreBufferId].filePath)
+        const buffer = await this.readBufferStoreFile(this.bufferStores[restoreBufferId].filePath)
         const allSaved = buffer.tabs.every((file) => file.isSaved)
         if (buffer.tabs.length === 0 || allSaved) {
-          fs.unlinkSync(this.bufferStores[restoreBufferId].filePath)
+          await fsPromises.unlink(this.bufferStores[restoreBufferId].filePath)
           delete this.bufferStores[restoreBufferId]
         }
       } catch (e) {
@@ -161,8 +171,8 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return this.bufferStores[restoreBufferId]
   }
 
-  readBufferStoreFile(filePath: string): BufferStoreContent {
-    const content = fs.readFileSync(filePath, 'utf8')
+  async readBufferStoreFile(filePath: string): Promise<BufferStoreContent> {
+    const content = await fsPromises.readFile(filePath, 'utf8')
     if (!content.trim()) {
       throw new Error('Buffer store file is empty.')
     }
@@ -175,13 +185,20 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     return buffer
   }
 
-  writeBufferStoreFile(filePath: string, newState: unknown): void {
+  writeBufferStoreFile(filePath: string, newState: unknown): Promise<void> {
     // Durable atomic write: write-file-atomic writes to a temp file, fsyncs it,
     // then renames it over the target. The previous temp-file + rename here was
     // namespace-atomic (crash-safe) but omitted the fsync, so a power loss could
     // still leave this crash-recovery buffer — which holds unsaved tab content —
     // truncated or zero-filled, the same gap the document save path had (#3786).
-    writeFileAtomic.sync(filePath, JSON.stringify(newState), 'utf8')
+    const payload = JSON.stringify(newState)
+    const previous = writeQueues.get(filePath) ?? Promise.resolve()
+    const next = previous
+      .catch(() => undefined)
+      .then(() => writeFileAtomic(filePath, payload, 'utf8'))
+      .then(() => undefined)
+    writeQueues.set(filePath, next)
+    return next
   }
 
   updateBufferState(e: IpcMainInvokeEvent, newState: unknown): boolean {
@@ -194,7 +211,11 @@ class EditorBufferStore extends TypedEmitter<EditorBufferStoreEvents> {
     }
 
     const bufferStore = this.getBufferStoreInfo(restoreBufferId)
-    this.writeBufferStoreFile(bufferStore.filePath, newState)
+    // Fire-and-forget: the renderer re-sends the full state on every update,
+    // so a lost write only costs crash-recovery fidelity — never user data.
+    this.writeBufferStoreFile(bufferStore.filePath, newState).catch((err) => {
+      console.error('Failed to persist editor buffer state:', err)
+    })
     return true
   }
 

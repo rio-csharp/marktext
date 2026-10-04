@@ -16,6 +16,54 @@ interface ActiveSearch {
 
 const activeSearches = new Map<string, ActiveSearch>()
 
+// Matches are batched before crossing IPC: a large search can produce
+// thousands of results per second, and one message per match (plus one
+// progress update per file) previously saturated the IPC channel.
+const MATCH_BATCH_SIZE = 100
+const MATCH_BATCH_WINDOW_MS = 16
+
+interface MatchBatcher {
+  queue: (payload: unknown) => void
+  flush: () => void
+  dispose: () => void
+}
+
+const createMatchBatcher = (sender: WebContents, searchId: string, getNum: () => number): MatchBatcher => {
+  const queue: unknown[] = []
+  let flushTimer: NodeJS.Timeout | null = null
+
+  const flush = (): void => {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    if (queue.length === 0) return
+    const batch = queue.splice(0, queue.length)
+    // One progress update per batch instead of one per matched file.
+    sendIfAlive(sender, 'mt::rg::progress', { searchId, num: getNum() })
+    sendIfAlive(sender, 'mt::rg::match', { searchId, payload: batch })
+  }
+
+  return {
+    queue: (payload: unknown): void => {
+      queue.push(payload)
+      if (queue.length >= MATCH_BATCH_SIZE) {
+        flush()
+      } else if (!flushTimer) {
+        flushTimer = setTimeout(flush, MATCH_BATCH_WINDOW_MS)
+      }
+    },
+    flush,
+    dispose: (): void => {
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      queue.length = 0
+    }
+  }
+}
+
 const sendIfAlive = (
   sender: WebContents | null | undefined,
   channel: string,
@@ -186,10 +234,13 @@ const startTextSearch = (
   let pendingDirs = directories.length
   let finished = false
 
+  const batcher = createMatchBatcher(sender, searchId, () => pendingPaths)
+
   const finishIfDone = (err?: unknown): void => {
     if (finished) return
     if (pendingDirs === 0 || err) {
       finished = true
+      batcher.flush()
       activeSearches.delete(searchId)
       if (err) {
         sendIfAlive(sender, 'mt::rg::error', {
@@ -204,6 +255,7 @@ const startTextSearch = (
 
   const cancel = (): void => {
     cancelled = true
+    batcher.dispose()
     for (const child of children) {
       try {
         child.kill()
@@ -270,8 +322,7 @@ const startTextSearch = (
           const message = JSON.parse(buffer)
           if (message.type === 'end' && pendingEvent) {
             pendingPaths++
-            sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-            sendIfAlive(sender, 'mt::rg::match', { searchId, payload: pendingEvent })
+            batcher.queue(pendingEvent)
           }
         } catch {
           /* parse error */
@@ -317,8 +368,7 @@ const startTextSearch = (
             }
           } else if (message.type === 'end') {
             pendingPaths++
-            sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-            sendIfAlive(sender, 'mt::rg::match', { searchId, payload: pendingEvent })
+            batcher.queue(pendingEvent)
             pendingEvent = null
           }
         } catch (err) {
@@ -342,10 +392,13 @@ const startFileSearch = (
   let pendingDirs = directories.length
   let finished = false
 
+  const batcher = createMatchBatcher(sender, searchId, () => pendingPaths)
+
   const finishIfDone = (err?: unknown): void => {
     if (finished) return
     if (pendingDirs === 0 || err) {
       finished = true
+      batcher.flush()
       activeSearches.delete(searchId)
       if (err) {
         sendIfAlive(sender, 'mt::rg::error', {
@@ -360,6 +413,7 @@ const startFileSearch = (
 
   const cancel = (): void => {
     cancelled = true
+    batcher.dispose()
     for (const child of children) {
       try {
         child.kill()
@@ -414,8 +468,7 @@ const startFileSearch = (
       buffer = lines.pop() ?? ''
       for (const line of lines) {
         pendingPaths++
-        sendIfAlive(sender, 'mt::rg::progress', { searchId, num: pendingPaths })
-        sendIfAlive(sender, 'mt::rg::match', { searchId, payload: line })
+        batcher.queue(line)
       }
     })
   }

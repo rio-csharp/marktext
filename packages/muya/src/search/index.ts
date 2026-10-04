@@ -6,10 +6,22 @@ import type { IMatch } from './types';
 import { DEFAULT_SEARCH_OPTIONS } from '../config';
 import { buildRegexValue, matchString } from '../utils/search';
 
+function sameHighlights(a: IHighlight[], b: IHighlight[]) {
+    return (
+        a.length === b.length
+        && a.every((h, i) => h.start === b[i].start && h.end === b[i].end && h.active === b[i].active)
+    );
+}
+
 export class Search {
     private _value: string = '';
     public matches: IMatch[] = [];
     public index: number = -1;
+
+    // Blocks currently painted with search highlights, mapped to the exact
+    // highlight list they were rendered with — re-renders diff against this
+    // instead of clearing and re-painting every matched block.
+    private _highlightedBlocks = new Map<Content, IHighlight[]>();
 
     get value() {
         return this._value;
@@ -27,40 +39,51 @@ export class Search {
         this._value = '';
         this.matches = [];
         this.index = -1;
+        this._highlightedBlocks = new Map();
     }
 
-    private _updateMatches(isClear = false) {
+    private _renderMatches() {
         const { matches, index } = this;
-        let i;
-        const len = matches.length;
-        const matchesMap = new Map<Content, IHighlight[]>();
+        const next = new Map<Content, IHighlight[]>();
 
-        for (i = 0; i < len; i++) {
+        for (let i = 0; i < matches.length; i++) {
             const { block, start, end } = matches[i];
-            const active = i === index;
-            const highlight: IHighlight = { start, end, active };
-            const highlights = matchesMap.get(block);
+            const highlight: IHighlight = { start, end, active: i === index };
+            const highlights = next.get(block);
 
-            if (matchesMap.has(block) && Array.isArray(highlights)) {
+            if (highlights)
                 highlights.push(highlight);
-                matchesMap.set(block, highlights);
-            }
-            else {
-                matchesMap.set(block, [highlight]);
-            }
+            else
+                next.set(block, [highlight]);
         }
 
-        for (const [block, highlights] of matchesMap.entries()) {
+        for (const [block, highlights] of this._highlightedBlocks) {
+            if (next.has(block))
+                continue;
+
+            block.update(undefined, []);
+
+            if (block.parent?.active && !highlights.some(h => h.active))
+                block.blurHandler();
+        }
+
+        for (const [block, highlights] of next) {
+            const prev = this._highlightedBlocks.get(block);
+            if (prev && sameHighlights(prev, highlights))
+                continue;
+
             const isActive = highlights.some(h => h.active);
 
-            block.update(undefined, isClear ? [] : highlights);
+            block.update(undefined, highlights);
 
             if (block.parent?.active && !isActive)
                 block.blurHandler();
 
-            if (isActive && !isClear)
+            if (isActive)
                 block.focusHandler();
         }
+
+        this._highlightedBlocks = next;
     }
 
     private _innerReplace(matches: IMatch[], value: string) {
@@ -141,8 +164,7 @@ export class Search {
 
         this.index = index;
 
-        this._updateMatches(true);
-        this._updateMatches();
+        this._renderMatches();
 
         return this;
     }
@@ -162,9 +184,6 @@ export class Search {
         // `selectHighlight` request can drop the cursor back onto it when the
         // new search has no match of its own (e.g. closing the search bar).
         const prevActiveMatch = this.matches[this.index];
-
-        // Empty last search.
-        this._updateMatches(true);
 
         // Highlight current search.
         if (value) {
@@ -200,7 +219,7 @@ export class Search {
 
         Object.assign(this, { _value: value, matches, index });
 
-        this._updateMatches();
+        this._renderMatches();
 
         // Restore the editor cursor onto the active match. Mirrors muyajs's
         // `render(selectHighlight)` -> `setCursor()` path: closing the search

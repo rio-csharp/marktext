@@ -7,7 +7,7 @@
         type="text"
         class="search-input"
         :placeholder="t('sideBar.search.searchInFolder')"
-        @keyup="search"
+        @keyup="debouncedSearch"
       >
       <div class="controls">
         <span
@@ -79,8 +79,8 @@
       class="search-result"
     >
       <search-result-item
-        v-for="(item, index) of searchResult"
-        :key="index"
+        v-for="item of searchResult"
+        :key="item.filePath"
         :search-result="item"
       />
     </div>
@@ -105,6 +105,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import debounce from 'lodash/debounce'
 import { useLayoutStore } from '@/store/layout'
 import { useProjectStore } from '@/store/project'
 import { useEditorStore } from '@/store/editor'
@@ -249,6 +250,11 @@ const search = (): void => {
 
   searcherCancelCallback = cancellable.cancel.bind(cancellable)
 }
+
+// Each keystroke used to cancel + respawn a ripgrep child process; hold the
+// search until typing pauses. Toggle buttons below still call `search`
+// directly for immediate feedback.
+const debouncedSearch = debounce(search, 300)
 
 const handleFindInFolder = (executeSearch: boolean | unknown = true): void => {
   nextTick(() => {

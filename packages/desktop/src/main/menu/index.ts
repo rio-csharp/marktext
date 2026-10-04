@@ -1,8 +1,9 @@
 import fs from 'fs'
+import fsPromises from 'fs/promises'
 import path from 'path'
 import { app, Menu, ipcMain, type BrowserWindow } from 'electron'
 import log from 'electron-log'
-import { ensureDirSync, isDirectory2, isFile2 } from 'common/filesystem'
+import { ensureDirSync } from 'common/filesystem'
 import { isLinux, isOsx, isWindows } from '../config'
 import { updateSidebarMenu } from '../menu/actions/edit'
 import { updateFormatMenu } from '../menu/actions/format'
@@ -48,6 +49,10 @@ class AppMenu {
   public readonly isOsxOrWindows: boolean
   public activeWindowId: number
   public windowMenus: Map<number, WindowMenuEntry>
+  private _recentDocuments: string[] | null
+  private _recentsDirty: boolean
+  private _recentsWriteTimer: NodeJS.Timeout | null
+  private _menuRebuildScheduled: boolean
 
   /**
    * @param preferences The preferences instances.
@@ -67,6 +72,23 @@ class AppMenu {
     this.isOsxOrWindows = isOsx || isWindows
     this.activeWindowId = -1
     this.windowMenus = new Map()
+    this._recentDocuments = null
+    this._recentsDirty = false
+    this._recentsWriteTimer = null
+    this._menuRebuildScheduled = false
+
+    // The recents list lives in memory; it is loaded once and every mutation
+    // is persisted with a debounced async write. On macOS the OS manages the
+    // recents list natively, so the JSON file is unused there.
+    if (!isOsx) {
+      this._loadRecentlyUsedDocuments().catch((err) => {
+        log.error('Error while loading recently used documents:', err)
+      })
+      // Flush a pending debounced write at quit, otherwise recents added in
+      // the final moments of a session would silently vanish. One sync write
+      // during shutdown is acceptable.
+      app.on('before-quit', () => this._flushRecentlyUsedDocumentsSync())
+    }
 
     // Initialize main process language from preferences
     this._initializeLanguage()
@@ -80,14 +102,13 @@ class AppMenu {
    * @param filePath The file or directory full path.
    */
   addRecentlyUsedDocument(filePath: string): void {
-    const { isOsxOrWindows, RECENTS_PATH } = this
+    const { isOsxOrWindows } = this
 
     if (isOsxOrWindows) app.addRecentDocument(filePath)
     if (isOsx) return
 
     const recentDocuments = this.getRecentlyUsedDocuments()
     const index = recentDocuments.indexOf(filePath)
-    let needSave = index !== 0
     if (index > 0) {
       recentDocuments.splice(index, 1)
     }
@@ -96,62 +117,35 @@ class AppMenu {
     }
 
     if (recentDocuments.length > MAX_RECENTLY_USED_DOCUMENTS) {
-      needSave = true
       recentDocuments.splice(
         MAX_RECENTLY_USED_DOCUMENTS,
         recentDocuments.length - MAX_RECENTLY_USED_DOCUMENTS
       )
     }
 
-    this.updateAppMenu(recentDocuments)
-
-    if (needSave) {
-      ensureDirSync(this._userDataPath)
-      const json = JSON.stringify(recentDocuments, null, 2)
-      fs.writeFileSync(RECENTS_PATH, json, 'utf-8')
-    }
+    this._recentDocuments = recentDocuments
+    this._schedulePersistRecentlyUsedDocuments()
+    this.updateAppMenu()
   }
 
   /**
    * Returns a list of all recently used documents and folders.
    */
   getRecentlyUsedDocuments(): string[] {
-    const { RECENTS_PATH } = this
-    if (!isFile2(RECENTS_PATH)) {
-      return []
-    }
-
-    try {
-      const recentDocuments: string[] = JSON.parse(fs.readFileSync(RECENTS_PATH, 'utf-8')).filter(
-        (f: string) => f && (isFile2(f) || isDirectory2(f))
-      )
-
-      if (recentDocuments.length > MAX_RECENTLY_USED_DOCUMENTS) {
-        recentDocuments.splice(
-          MAX_RECENTLY_USED_DOCUMENTS,
-          recentDocuments.length - MAX_RECENTLY_USED_DOCUMENTS
-        )
-      }
-      return recentDocuments
-    } catch (err) {
-      log.error('Error while read recently used documents:', err)
-      return []
-    }
+    return [...(this._recentDocuments ?? [])]
   }
 
   /**
    * Clear recently used documents.
    */
   clearRecentlyUsedDocuments(): void {
-    const { isOsxOrWindows, RECENTS_PATH } = this
+    const { isOsxOrWindows } = this
     if (isOsxOrWindows) app.clearRecentDocuments()
     if (isOsx) return
 
-    const recentDocuments: string[] = []
-    this.updateAppMenu(recentDocuments)
-    const json = JSON.stringify(recentDocuments, null, 2)
-    ensureDirSync(this._userDataPath)
-    fs.writeFileSync(RECENTS_PATH, json, 'utf-8')
+    this._recentDocuments = []
+    this._schedulePersistRecentlyUsedDocuments()
+    this.updateAppMenu()
   }
 
   /**
@@ -277,9 +271,23 @@ class AppMenu {
    * NOTE: We need this method to add or remove menu items at runtime.
    */
   updateAppMenu(recentUsedDocuments?: string[]): void {
-    if (!recentUsedDocuments) {
-      recentUsedDocuments = this.getRecentlyUsedDocuments()
+    if (recentUsedDocuments) {
+      this._recentDocuments = [...recentUsedDocuments]
     }
+
+    // Coalesce bursts into one rebuild per tick: restoring a session fires one
+    // addRecentlyUsedDocument per tab, and rebuilding every window menu per
+    // file is quadratic work that stalls the main process.
+    if (this._menuRebuildScheduled) return
+    this._menuRebuildScheduled = true
+    setImmediate(() => {
+      this._menuRebuildScheduled = false
+      this._rebuildEditorMenus()
+    })
+  }
+
+  private _rebuildEditorMenus(): void {
+    const recentUsedDocuments = this.getRecentlyUsedDocuments()
 
     // "we don't support changing menu object after calling setMenu, the behavior
     // is undefined if user does that." That mean we have to recreate the editor
@@ -428,6 +436,85 @@ class AppMenu {
       }
       autoSaveMenu.checked = autoSave
     })
+  }
+
+  private async _loadRecentlyUsedDocuments(): Promise<void> {
+    let candidates: string[] = []
+    try {
+      const parsed: unknown = JSON.parse(await fsPromises.readFile(this.RECENTS_PATH, 'utf-8'))
+      if (Array.isArray(parsed)) {
+        candidates = parsed.filter((f): f is string => typeof f === 'string' && f.length > 0)
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        log.error('Error while read recently used documents:', err)
+      }
+    }
+
+    // Existence is verified once at startup, in parallel; from then on the
+    // list is maintained in memory rather than re-stat'ing every entry on each
+    // menu rebuild.
+    const existsFlags = await Promise.all(
+      candidates.map(async(f) => {
+        try {
+          await fsPromises.access(f)
+          return true
+        } catch {
+          return false
+        }
+      })
+    )
+    this._recentDocuments = candidates
+      .filter((_, i) => existsFlags[i])
+      .slice(0, MAX_RECENTLY_USED_DOCUMENTS)
+
+    // Menus built before the load completed were rendered without recents.
+    if (this.windowMenus.size > 0) {
+      this.updateAppMenu()
+    }
+  }
+
+  private _schedulePersistRecentlyUsedDocuments(): void {
+    this._recentsDirty = true
+    if (this._recentsWriteTimer) {
+      clearTimeout(this._recentsWriteTimer)
+    }
+    // Debounce: session restoration adds one entry per tab in a burst.
+    this._recentsWriteTimer = setTimeout(() => {
+      this._recentsWriteTimer = null
+      this._persistRecentlyUsedDocuments().catch((err) => {
+        log.error('Error while writing recently used documents:', err)
+      })
+    }, 500)
+  }
+
+  private async _persistRecentlyUsedDocuments(): Promise<void> {
+    if (!this._recentsDirty) return
+    const json = JSON.stringify(this._recentDocuments ?? [], null, 2)
+    this._recentsDirty = false
+    try {
+      await fsPromises.mkdir(this._userDataPath, { recursive: true })
+      await fsPromises.writeFile(this.RECENTS_PATH, json, 'utf-8')
+    } catch (err) {
+      // Keep the dirty flag so the next mutation retries the write.
+      this._recentsDirty = true
+      log.error('Error while writing recently used documents:', err)
+    }
+  }
+
+  private _flushRecentlyUsedDocumentsSync(): void {
+    if (this._recentsWriteTimer) {
+      clearTimeout(this._recentsWriteTimer)
+      this._recentsWriteTimer = null
+    }
+    if (!this._recentsDirty) return
+    this._recentsDirty = false
+    try {
+      ensureDirSync(this._userDataPath)
+      fs.writeFileSync(this.RECENTS_PATH, JSON.stringify(this._recentDocuments ?? [], null, 2), 'utf-8')
+    } catch (err) {
+      log.error('Error while writing recently used documents on quit:', err)
+    }
   }
 
   _buildEditorMenu(recentUsedDocuments: string[] | null = null): WindowMenuEntry {
